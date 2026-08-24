@@ -49,12 +49,12 @@ $ cargo build --release
 $ cargo run --release --example migration_probe -- --runs 30 -- uv run tiingo-mcp
     Finished `release` profile [optimized] target(s) in 0.11s
      Running `target/release/examples/migration_probe --runs 30 -- uv run tiingo-mcp`
-{"rss_initialized_bytes_median":113721344,"rss_workload_bytes_median":114032640,"runs":30,"startup_ms_median":478.661958,"startup_ms_p95":598.049666}
+{"rss_initialized_bytes_median":113360896,"rss_workload_bytes_median":113672192,"runs":30,"startup_ms_median":452.486167,"startup_ms_p95":501.585875}
 
 $ cargo run --release --example migration_probe -- --runs 30 -- target/release/tiingo-mcp
-    Finished `release` profile [optimized] target(s) in 0.11s
+    Finished `release` profile [optimized] target(s) in 0.12s
      Running `target/release/examples/migration_probe --runs 30 -- target/release/tiingo-mcp`
-{"rss_initialized_bytes_median":10305536,"rss_workload_bytes_median":10797056,"runs":30,"startup_ms_median":4.8952919999999995,"startup_ms_p95":5.304125}
+{"rss_initialized_bytes_median":10321920,"rss_workload_bytes_median":10813440,"runs":30,"startup_ms_median":4.3168750000000005,"startup_ms_p95":4.6015}
 
 $ uv run python scripts/benchmark_python_wrapper.py
 {"runs": 1000, "wrapper_us_median": 848.209, "wrapper_us_p95": 1008.917}
@@ -71,10 +71,10 @@ Percentages are reductions from Python: `(Python - Rust) / Python * 100`.
 
 | Predicate | Python | Rust | Difference | Result |
 |---|---:|---:|---:|---|
-| Median cold start | 478.661958 ms | 4.895292 ms | 98.977297% lower | PASS |
-| p95 cold start | 598.049666 ms | 5.304125 ms | 99.113096% lower | informational |
-| Median initialized RSS | 113,721,344 bytes | 10,305,536 bytes | 90.937905% lower | PASS |
-| Median post-workload RSS | 114,032,640 bytes | 10,797,056 bytes | 90.531609% lower | PASS |
+| Median cold start | 452.486167 ms | 4.316875 ms | 99.045965% lower | PASS |
+| p95 cold start | 501.585875 ms | 4.601500 ms | 99.082610% lower | informational |
+| Median initialized RSS | 113,360,896 bytes | 10,321,920 bytes | 90.894638% lower | PASS |
+| Median post-workload RSS | 113,672,192 bytes | 10,813,440 bytes | 90.487172% lower | PASS |
 | Median local wrapper | 848.209 us | 79.667 us | 90.607621% lower | informational |
 | p95 local wrapper | 1,008.917 us | 157.917 us | 84.347870% lower | PASS |
 
