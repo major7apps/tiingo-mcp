@@ -30,7 +30,9 @@ mkdir -p "$stage/server" target/distrib
 cp packaging/mcpb/manifest.json "$stage/manifest.json"
 cp "$binary" "$stage/server/$executable"
 chmod +x "$stage/server/$executable" 2>/dev/null || true
-jq --arg platform "$platform" '.compatibility.platforms = [$platform]' \
+jq --arg platform "$platform" --arg executable "$executable" \
+  '.compatibility.platforms = [$platform]
+   | .server.entry_point = "server/" + $executable' \
   "$stage/manifest.json" > "$stage/manifest.tmp.json"
 mv "$stage/manifest.tmp.json" "$stage/manifest.json"
 npx --yes @anthropic-ai/mcpb@2.1.2 validate "$stage/manifest.json"

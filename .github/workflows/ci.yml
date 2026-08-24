@@ -123,7 +123,9 @@ jobs:
 
       - name: Validate staged MCPB manifest with CLI 2.1.2
         shell: bash
-        run: npx --yes @anthropic-ai/mcpb@2.1.2 validate target/mcpb/${{ matrix.target }}/manifest.json
+        run: |
+          test "$(jq -r '.server.entry_point' target/mcpb/${{ matrix.target }}/manifest.json)" = "server/${{ matrix.executable }}"
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate target/mcpb/${{ matrix.target }}/manifest.json
 
       - name: Inspect MCPB archive with CLI 2.1.2
         shell: bash

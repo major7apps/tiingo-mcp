@@ -177,6 +177,6 @@ fn version_exits_without_starting_mcp() {
         .timeout(Duration::from_secs(5))
         .assert()
         .success()
-        .stdout("tiingo-mcp 2.0.0\n")
+        .stdout(format!("tiingo-mcp {}\n", env!("CARGO_PKG_VERSION")))
         .stderr("");
 }

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 (Unreleased)
+## 2.0.0 (2026-08-24)
 
 ### Breaking changes
 
@@ -65,4 +65,4 @@ Initial release.
 - Automatic retries on transient errors
 - Structured error handling (401, 403, 404, 429, 5xx)
 - PyPI-publishable, installable via `uvx tiingo-mcp`
-- stdio transport support
+- stdio and HTTP transport support

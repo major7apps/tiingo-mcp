@@ -5,6 +5,8 @@ members = ["cargo:."]
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.32.0"
+# Keep the reviewed MCPB packaging and least-privilege permissions in release.yml.
+allow-dirty = ["ci"]
 # CI backends to support
 ci = "github"
 # Release automation is intentionally tag-only.

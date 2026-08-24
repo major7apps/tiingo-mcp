@@ -2,6 +2,8 @@
 
 Date: 2026-08-24
 
+> **Historical discovery report.** This report predates the approved cutover design and records options considered during research. The implemented 2.0 architecture is the single Cargo package at the repository root, uses stdio only, removes PyPI/`uvx` compatibility, and includes bounded retries and an 8 MiB response limit. The approved design in `docs/superpowers/specs/2026-08-24-tiingo-rust-rmcp-parity-cutover-design.md` is authoritative where this report differs.
+
 ## Executive decision
 
 A complete Rust rewrite is feasible. RMCP is no longer the experimental part of the decision: it is the official Rust MCP SDK, the MCP project currently classifies Rust as Tier 1, and `rmcp` 3.1.4 supports tools, resources, prompts, stdio, Streamable HTTP, subscriptions, tasks, structured results, and current protocol negotiation. The current server's 17 tools, four resources, five prompts, lifecycle, and stdio transport all have direct RMCP equivalents. ([MCP SDK tiers](https://modelcontextprotocol.io/docs/sdk), [RMCP repository](https://github.com/modelcontextprotocol/rust-sdk), [rmcp 3.1.4](https://crates.io/crates/rmcp))

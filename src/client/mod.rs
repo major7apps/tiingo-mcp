@@ -56,9 +56,16 @@ impl TiingoClient {
                 "Tiingo route must use the configured origin".to_owned(),
             ));
         }
-        let api_key = self.config.api_key.as_deref().ok_or_else(|| {
-            TiingoError::Configuration("set TIINGO_API_KEY before calling Tiingo tools".to_owned())
-        })?;
+        let api_key = self
+            .config
+            .api_key
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                TiingoError::Configuration(
+                    "set TIINGO_API_KEY before calling Tiingo tools".to_owned(),
+                )
+            })?;
         let mut authorization =
             HeaderValue::from_str(&format!("Token {api_key}")).map_err(|_| {
                 TiingoError::Configuration("TIINGO_API_KEY contains invalid characters".to_owned())

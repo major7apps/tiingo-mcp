@@ -66,6 +66,24 @@ fn percentile_index(length: usize, percentile: f64) -> usize {
     ((percentile * length as f64).ceil() as usize).saturating_sub(1)
 }
 
+fn median_f64(sorted: &[f64]) -> f64 {
+    let upper = sorted.len() / 2;
+    if sorted.len() % 2 == 0 {
+        (sorted[upper - 1] + sorted[upper]) / 2.0
+    } else {
+        sorted[upper]
+    }
+}
+
+fn median_u64(sorted: &[u64]) -> u64 {
+    let upper = sorted.len() / 2;
+    if sorted.len() % 2 == 0 {
+        ((u128::from(sorted[upper - 1]) + u128::from(sorted[upper])) / 2) as u64
+    } else {
+        sorted[upper]
+    }
+}
+
 fn write_message(stdin: &mut impl Write, message: &Value) -> anyhow::Result<()> {
     serde_json::to_writer(&mut *stdin, message)?;
     stdin.write_all(b"\n")?;
@@ -406,16 +424,15 @@ fn process_probe(runs: usize, command: &[String]) -> anyhow::Result<()> {
     rss_initialized.sort_unstable();
     rss_workload.sort_unstable();
 
-    let median = (runs - 1) / 2;
     let p95 = percentile_index(runs, 0.95);
     println!(
         "{}",
         json!({
             "runs": runs,
-            "startup_ms_median": startup_ms[median],
+            "startup_ms_median": median_f64(&startup_ms),
             "startup_ms_p95": startup_ms[p95],
-            "rss_initialized_bytes_median": rss_initialized[median],
-            "rss_workload_bytes_median": rss_workload[median],
+            "rss_initialized_bytes_median": median_u64(&rss_initialized),
+            "rss_workload_bytes_median": median_u64(&rss_workload),
         })
     );
     Ok(())
@@ -515,7 +532,7 @@ async fn wrapper_probe(runs: usize) -> anyhow::Result<()> {
         "{}",
         json!({
             "runs": runs,
-            "wrapper_us_median": samples[(runs - 1) / 2],
+            "wrapper_us_median": median_f64(&samples),
             "wrapper_us_p95": samples[percentile_index(runs, 0.95)],
         })
     );
@@ -547,6 +564,12 @@ mod tests {
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn medians_average_the_two_middle_values_for_even_samples() {
+        assert_eq!(median_f64(&[1.0, 3.0]), 2.0);
+        assert_eq!(median_u64(&[1, 3]), 2);
+    }
 
     fn pid_file(name: &str) -> PathBuf {
         let nonce = SystemTime::now()

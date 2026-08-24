@@ -35,6 +35,48 @@ async fn missing_key_is_a_sanitized_configuration_error() {
     assert!(!error.to_string().contains("Token "));
 }
 
+#[tokio::test]
+async fn empty_key_is_a_sanitized_configuration_error() {
+    let client = TiingoClient::new(test_config(
+        Url::parse("http://127.0.0.1:9").unwrap(),
+        Some(""),
+    ))
+    .unwrap();
+
+    let error = client
+        .get_json("stock metadata", "/tiingo/daily/AAPL", &[])
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, TiingoError::Configuration(_)));
+    assert!(!error.to_string().contains("Token "));
+}
+
+#[test]
+fn config_debug_redacts_the_api_key() {
+    let config = test_config(
+        Url::parse("https://api.tiingo.com").unwrap(),
+        Some("debug-secret"),
+    );
+
+    let rendered = format!("{config:?}");
+    assert!(!rendered.contains("debug-secret"));
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(rendered.contains("api.tiingo.com"));
+}
+
+#[test]
+fn validation_payload_includes_the_actionable_detail() {
+    let payload = TiingoError::Validation("tickers cannot be empty".into()).payload();
+
+    assert_eq!(payload.kind, "validation");
+    assert_eq!(
+        payload.message,
+        "tickers cannot be empty. Correct the request and try again."
+    );
+    assert_eq!(payload.status_code, None);
+}
+
 #[test]
 fn only_safe_transient_statuses_retry() {
     assert!(TiingoError::status_is_retryable(429));

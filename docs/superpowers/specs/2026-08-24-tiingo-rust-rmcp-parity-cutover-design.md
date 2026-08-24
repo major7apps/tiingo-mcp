@@ -201,7 +201,7 @@ All Tiingo operations in this delivery are GET requests. A call is attempted at 
 
 Error text includes the Tiingo capability and a useful next action but does not speculate about a user's subscription plan. Logs redact the authorization header and never serialize the API key. Unexpected responses record status and a bounded body excerpt on stderr; the MCP error receives a sanitized message.
 
-The client enforces an 8 MiB maximum decoded response size in this release. Crossing it returns a classified error that asks the caller to narrow dates, tickers, or limits. The limit is a tested constant, not exposed as premature configuration; the performance report records the largest captured fixture and the resulting safety margin.
+The client enforces an 8 MiB maximum decoded response size in this release. Crossing it returns a classified error that asks the caller to narrow dates, tickers, or limits. The limit is a tested constant, not exposed as premature configuration; boundary tests cover decoded upstream responses, while the performance report records the frozen MCP contract fixture only as local payload context.
 
 ## Testing and evidence
 
@@ -257,7 +257,7 @@ The current Smithery `uvx` command function is removed. It is replaced by the MC
 4. Replace CI, release automation, Smithery/MCPB metadata, README examples, badges, changelog, and repository guidance with their Rust equivalents.
 5. Delete `src/tiingo_mcp`, all Python tests, `pyproject.toml`, `uv.lock`, Python-specific configuration, and the local virtual environment.
 6. Prove a clean clone can build, test, package, install, and launch using only the declared Rust toolchain or a downloaded native artifact.
-7. Tag `2.0.0`. The last Python release remains recoverable from its Git tag and Git history but is not retained on the new branch.
+7. After an explicit release-readiness handoff and user authorization, create and push the `2.0.0` tag, publish the crate, create the GitHub release, and publish the MCPB bundles. The last Python release remains recoverable from its Git tag and Git history but is not retained on the new branch. For this release, that authorization was granted while the PR remained open.
 
 Python deletion happens only after step 3. The virtual environment is untracked and is removed last; it can be recreated from the historical release but is not recoverable in place.
 

@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{env, fmt, time::Duration};
 
 use url::Url;
 
@@ -39,13 +39,26 @@ impl RetryPolicy {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub api_key: Option<String>,
     pub base_url: Url,
     pub request_timeout: Duration,
     pub retry: RetryPolicy,
     pub max_response_bytes: usize,
+}
+
+impl fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("base_url", &self.base_url)
+            .field("request_timeout", &self.request_timeout)
+            .field("retry", &self.retry)
+            .field("max_response_bytes", &self.max_response_bytes)
+            .finish()
+    }
 }
 
 impl Config {

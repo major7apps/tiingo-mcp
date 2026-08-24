@@ -76,9 +76,9 @@ impl TiingoError {
                         .into(),
                 status_code: None,
             },
-            Self::Validation(_) => ErrorPayload {
+            Self::Validation(detail) => ErrorPayload {
                 kind: "validation",
-                message: "Correct the request and try again.".into(),
+                message: format!("{detail}. Correct the request and try again."),
                 status_code: None,
             },
             Self::Authentication { capability } => payload(

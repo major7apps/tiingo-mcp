@@ -15,7 +15,7 @@
 
 name: Release
 permissions:
-  "contents": "write"
+  "contents": "read"
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -46,6 +46,8 @@ on:
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
+    permissions:
+      "contents": "write"
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
@@ -147,6 +149,16 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - name: Build MCPB 0.3 bundles
+        shell: bash
+        run: |
+          for target in ${{ join(matrix.targets, ' ') }}; do
+            executable="tiingo-mcp"
+            if [[ "$target" == "x86_64-pc-windows-msvc" ]]; then
+              executable="tiingo-mcp.exe"
+            fi
+            bash packaging/mcpb/package.sh "$target" "target/$target/release/$executable"
+          done
       - name: Attest
         uses: actions/attest@v4
         with:
@@ -171,6 +183,7 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+            target/distrib/*.mcpb
 
   # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
@@ -220,6 +233,8 @@ jobs:
             ${{ env.BUILD_MANIFEST_NAME }}
   # Determines if we should publish/announce
   host:
+    permissions:
+      "contents": "write"
     needs:
       - plan
       - build-local-artifacts
