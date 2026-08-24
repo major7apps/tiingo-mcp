@@ -1,0 +1,30 @@
+{
+  "asset_class": "fundamentals",
+  "availability": {
+    "as_of": "2026-08-24",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://api.tiingo.com/documentation/end-of-day"
+    ],
+    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Financial statements are reported quarterly; don't expect daily granularity.",
+    "get_daily_fundamentals returns many rows -- use start_date/end_date to limit results.",
+    "get_company_meta accepts comma-separated tickers for batch lookups."
+  ],
+  "description": "Company financial statements, daily fundamental metrics, definitions, and company metadata.",
+  "ticker_format": "Uppercase symbols, e.g. AAPL, MSFT",
+  "tools": [
+    "get_fundamentals_definitions",
+    "get_financial_statements",
+    "get_daily_fundamentals",
+    "get_company_meta"
+  ],
+  "workflows": [
+    "Call get_fundamentals_definitions once to understand available metrics and their types.",
+    "Use get_financial_statements for quarterly/annual income, balance sheet, and cash flow data.",
+    "Use get_daily_fundamentals for time-series of daily metrics like marketCap and P/E ratio.",
+    "Use get_company_meta for sector, industry, country, and SIC code; supports multiple tickers."
+  ]
+}

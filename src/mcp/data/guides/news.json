@@ -1,0 +1,28 @@
+{
+  "asset_class": "news",
+  "availability": {
+    "as_of": "2026-08-24",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://api.tiingo.com/documentation/end-of-day"
+    ],
+    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Default limit is 10 articles -- increase for broader searches.",
+    "Omitting tickers returns broad market news, not company-specific.",
+    "sort_by values are crawlDate and publishedDate (exact case required)."
+  ],
+  "description": "Financial news articles from 50M+ sources, filterable by ticker, tag, and source.",
+  "ticker_format": "Comma-separated uppercase symbols, e.g. AAPL,MSFT",
+  "tools": [
+    "get_news"
+  ],
+  "workflows": [
+    "Filter by tickers to get company-specific news; multiple tickers = OR logic.",
+    "Filter by tags for topic-based news (e.g. earnings, dividends).",
+    "Use start_date/end_date to restrict date range; default returns most recent.",
+    "Paginate with limit and offset for large result sets.",
+    "Use sort_by='crawlDate' for recency or 'publishedDate' for article publish date."
+  ]
+}

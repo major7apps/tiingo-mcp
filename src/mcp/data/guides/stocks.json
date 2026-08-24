@@ -1,0 +1,30 @@
+{
+  "asset_class": "stocks",
+  "availability": {
+    "as_of": "2026-08-24",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://api.tiingo.com/documentation/end-of-day"
+    ],
+    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Ticker symbols are case-sensitive in the URL -- always uppercase.",
+    "Intraday data is limited to recent history; check metadata for available date range.",
+    "get_realtime_price may return stale data outside market hours unless after_hours=True."
+  ],
+  "description": "US and international equities with EOD historical prices, real-time IEX quotes, and intraday data.",
+  "ticker_format": "Uppercase symbols, e.g. AAPL, MSFT, GOOGL, BRK-A",
+  "tools": [
+    "get_stock_metadata",
+    "get_stock_prices",
+    "get_realtime_price",
+    "get_intraday_prices"
+  ],
+  "workflows": [
+    "Fetch metadata first with get_stock_metadata to verify ticker validity and date range.",
+    "Use get_stock_prices for EOD OHLCV history; supports daily/weekly/monthly/annually resampling.",
+    "Use get_realtime_price for current IEX top-of-book price during market hours.",
+    "Use get_intraday_prices for sub-daily data at 1min, 5min, 15min, 30min, or 1hour intervals."
+  ]
+}

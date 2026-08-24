@@ -1,0 +1,30 @@
+{
+  "asset_class": "crypto",
+  "availability": {
+    "as_of": "2026-08-24",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://api.tiingo.com/documentation/end-of-day"
+    ],
+    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Crypto tickers are lowercase (btcusd, not BTCUSD).",
+    "Crypto trades 24/7 -- no market-hours limitation.",
+    "get_crypto_quote with no tickers returns a large payload; filter by tickers when possible."
+  ],
+  "current_price_route": "/tiingo/crypto/prices",
+  "description": "Cryptocurrency prices, metadata, and historical data across exchanges.",
+  "ticker_format": "Lowercase base+quote, e.g. btcusd, ethusd, solusd",
+  "tools": [
+    "get_crypto_quote",
+    "get_crypto_prices",
+    "get_crypto_metadata"
+  ],
+  "workflows": [
+    "Use get_crypto_metadata to discover available tickers and supported exchanges.",
+    "Use get_crypto_quote for current prices; omit tickers to get all supported cryptos.",
+    "Use get_crypto_prices for historical OHLCV data at various intraday or daily intervals.",
+    "Pass comma-separated tickers to get_crypto_prices for multiple assets at once."
+  ]
+}
