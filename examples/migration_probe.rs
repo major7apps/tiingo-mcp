@@ -6,6 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use anyhow::{Context, ensure};
 use clap::Parser;
 use rmcp::{
@@ -52,6 +55,11 @@ struct ProcessSample {
     startup_ms: f64,
     rss_initialized_bytes: u64,
     rss_workload_bytes: u64,
+}
+
+#[derive(Debug)]
+struct CleanupOutcome {
+    forced: bool,
 }
 
 fn percentile_index(length: usize, percentile: f64) -> usize {
@@ -142,59 +150,101 @@ fn process_tree_rss_bytes(system: &mut System, child: &Child) -> anyhow::Result<
         .sum())
 }
 
-fn terminate_process_tree(
-    child: &mut Child,
-    system: &mut System,
-    process_tree: &mut HashSet<Pid>,
-) -> anyhow::Result<()> {
-    let root = Pid::from(child.id() as usize);
-    refresh_process_tree(system, root, process_tree);
-    for pid in process_tree.iter().filter(|pid| **pid != root) {
-        if let Some(process) = system.process(*pid) {
-            process.kill();
-        }
+fn configure_containment(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+}
+
+#[cfg(unix)]
+fn containment_is_alive(root_pid: u32) -> anyhow::Result<bool> {
+    let process_group = format!("-{root_pid}");
+    Ok(Command::new("/bin/kill")
+        .args(["-0", "--", &process_group])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?
+        .success())
+}
+
+#[cfg(windows)]
+fn containment_is_alive(root_pid: u32) -> anyhow::Result<bool> {
+    let mut system = System::new();
+    let root = Pid::from(root_pid as usize);
+    system.refresh_processes(ProcessesToUpdate::Some(&[root]), true);
+    Ok(system.process(root).is_some())
+}
+
+#[cfg(unix)]
+fn terminate_containment(child: &mut Child) -> anyhow::Result<()> {
+    let root_pid = child.id();
+    let process_group = format!("-{root_pid}");
+    let status = Command::new("/bin/kill")
+        .args(["-KILL", "--", &process_group])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() && containment_is_alive(root_pid)? {
+        anyhow::bail!("failed to terminate Unix process group {root_pid}");
     }
     if child.try_wait()?.is_none() {
+        child.wait()?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn terminate_containment(child: &mut Child) -> anyhow::Result<()> {
+    let root_pid = child.id().to_string();
+    let status = Command::new("taskkill")
+        .args(["/PID", &root_pid, "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() && child.try_wait()?.is_none() {
         child.kill()?;
     }
-    child.wait()?;
+    if child.try_wait()?.is_none() {
+        child.wait()?;
+    }
+    Ok(())
+}
+
+fn force_cleanup_process_tree(child: &mut Child) -> anyhow::Result<CleanupOutcome> {
+    let root_pid = child.id();
+    terminate_containment(child)?;
 
     let confirmation_deadline = Instant::now() + Duration::from_secs(1);
     loop {
-        system.refresh_processes(ProcessesToUpdate::All, true);
-        if process_tree
-            .iter()
-            .all(|pid| system.process(*pid).is_none())
-        {
-            return Ok(());
+        if !containment_is_alive(root_pid)? {
+            return Ok(CleanupOutcome { forced: true });
         }
         ensure!(
             Instant::now() < confirmation_deadline,
-            "failed to terminate complete launched process tree"
+            "failed to terminate complete launched containment"
         );
         thread::sleep(Duration::from_millis(10));
     }
 }
 
-fn cleanup_process_tree(child: &mut Child, timeout: Duration) -> anyhow::Result<()> {
-    let root = Pid::from(child.id() as usize);
+fn cleanup_process_tree(child: &mut Child, timeout: Duration) -> anyhow::Result<CleanupOutcome> {
+    let root_pid = child.id();
     let deadline = Instant::now() + timeout;
-    let mut system = System::new();
-    let mut process_tree = HashSet::from([root]);
     let mut root_status = None;
 
     loop {
-        refresh_process_tree(&mut system, root, &mut process_tree);
         if root_status.is_none() {
             root_status = child.try_wait()?;
         }
-        let tree_is_gone = process_tree
-            .iter()
-            .all(|pid| system.process(*pid).is_none());
-        if tree_is_gone {
-            let status = root_status.context("server process disappeared before it was reaped")?;
+        if !containment_is_alive(root_pid)?
+            && let Some(status) = root_status.or(child.try_wait()?)
+        {
             ensure!(status.success(), "server exited with {status}");
-            return Ok(());
+            return Ok(CleanupOutcome { forced: false });
         }
         if Instant::now() >= deadline {
             break;
@@ -202,11 +252,7 @@ fn cleanup_process_tree(child: &mut Child, timeout: Duration) -> anyhow::Result<
         thread::sleep(Duration::from_millis(10));
     }
 
-    terminate_process_tree(child, &mut system, &mut process_tree)?;
-    anyhow::bail!(
-        "server process tree did not exit within {:.3} seconds after stdin closed; terminated",
-        timeout.as_secs_f64()
-    )
+    force_cleanup_process_tree(child)
 }
 
 fn process_sample(command: &[String]) -> anyhow::Result<ProcessSample> {
@@ -218,11 +264,14 @@ fn process_sample_with_timeout(
     exit_timeout: Duration,
 ) -> anyhow::Result<ProcessSample> {
     let started = Instant::now();
-    let mut child = Command::new(&command[0])
+    let mut child_command = Command::new(&command[0]);
+    child_command
         .args(&command[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    configure_containment(&mut child_command);
+    let mut child = child_command
         .spawn()
         .with_context(|| format!("failed to spawn {}", command[0]))?;
     let stdin = child.stdin.take();
@@ -231,7 +280,7 @@ fn process_sample_with_timeout(
         (Some(stdin), Some(stdout)) => (stdin, stdout),
         _ => {
             let handle_error = anyhow::anyhow!("child stdio was not piped");
-            if let Err(cleanup_error) = cleanup_process_tree(&mut child, exit_timeout) {
+            if let Err(cleanup_error) = force_cleanup_process_tree(&mut child) {
                 eprintln!("cleanup after stdio error: {cleanup_error:#}");
             }
             return Err(handle_error);
@@ -308,7 +357,11 @@ fn process_sample_with_timeout(
         })
     })();
     drop(stdin);
-    let cleanup_result = cleanup_process_tree(&mut child, exit_timeout);
+    let cleanup_result = if probe_result.is_err() {
+        force_cleanup_process_tree(&mut child)
+    } else {
+        cleanup_process_tree(&mut child, exit_timeout)
+    };
     match probe_result {
         Err(probe_error) => {
             if let Err(cleanup_error) = cleanup_result {
@@ -317,7 +370,12 @@ fn process_sample_with_timeout(
             Err(probe_error)
         }
         Ok(sample) => {
-            cleanup_result?;
+            let cleanup = cleanup_result?;
+            ensure!(
+                !cleanup.forced,
+                "server process tree did not exit within {:.3} seconds after stdin closed; terminated",
+                exit_timeout.as_secs_f64()
+            );
             Ok(sample)
         }
     }
@@ -484,106 +542,217 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn pid_file(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "migration-probe-{name}-{}-{nonce}.pid",
+            std::process::id()
+        ))
+    }
+
+    fn read_descendant_pid(path: &Path) -> Pid {
+        let pid = fs::read_to_string(path)
+            .unwrap()
+            .trim()
+            .parse::<usize>()
+            .unwrap();
+        fs::remove_file(path).unwrap();
+        Pid::from(pid)
+    }
+
+    fn assert_process_is_gone(pid: Pid) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut system = System::new();
+        loop {
+            system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+            if system.process(pid).is_none() {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "long-lived descendant {pid} survived cleanup"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[cfg(unix)]
-    fn early_error_command() -> Vec<String> {
-        vec![
+    fn early_error_command() -> (Vec<String>, PathBuf) {
+        let pid_file = pid_file("early-error");
+        let command = vec![
             "/bin/sh".to_owned(),
             "-c".to_owned(),
-            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"early protocol error\"}}'; while :; do sleep 1; done"
-                .to_owned(),
-        ]
+            format!(
+                "sleep 60 & descendant=$!; printf '%s\\n' \"$descendant\" > '{}'; printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{{\"code\":-32602,\"message\":\"early protocol error\"}}}}'; wait",
+                pid_file.display()
+            ),
+        ];
+        (command, pid_file)
     }
 
     #[cfg(windows)]
-    fn early_error_command() -> Vec<String> {
-        vec![
-            "cmd".to_owned(),
-            "/D".to_owned(),
-            "/S".to_owned(),
-            "/C".to_owned(),
-            "echo {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"early protocol error\"}} & ping -t 127.0.0.1 >nul"
-                .to_owned(),
-        ]
+    fn early_error_command() -> (Vec<String>, PathBuf) {
+        let pid_file = pid_file("early-error");
+        let script = format!(
+            "$child=Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60' -PassThru; Set-Content -NoNewline -Path '{}' -Value $child.Id; Write-Output '{{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{{\"code\":-32602,\"message\":\"early protocol error\"}}}}'; Wait-Process -Id $child.Id",
+            pid_file.display()
+        );
+        (
+            vec![
+                "powershell".to_owned(),
+                "-NoProfile".to_owned(),
+                "-Command".to_owned(),
+                script,
+            ],
+            pid_file,
+        )
     }
 
     #[cfg(unix)]
-    fn ignores_eof_command() -> Vec<String> {
+    fn ignores_eof_command() -> (Vec<String>, PathBuf) {
+        let pid_file = pid_file("ignores-eof");
+        let command = vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            format!(
+                "sleep 60 & descendant=$!; printf '%s\\n' \"$descendant\" > '{}'; i=1; while [ $i -le 11 ]; do printf '{{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{{}}}}\\n' \"$i\"; i=$((i + 1)); done; wait",
+                pid_file.display()
+            ),
+        ];
+        (command, pid_file)
+    }
+
+    #[cfg(unix)]
+    fn exits_on_eof_command() -> Vec<String> {
         vec![
             "/bin/sh".to_owned(),
             "-c".to_owned(),
-            "i=1; while [ $i -le 11 ]; do printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\\n' \"$i\"; i=$((i + 1)); done; while :; do sleep 1; done"
+            "i=1; while [ $i -le 11 ]; do printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\\n' \"$i\"; i=$((i + 1)); done; cat >/dev/null"
                 .to_owned(),
         ]
     }
 
     #[cfg(unix)]
-    fn descendant_command() -> Command {
+    fn descendant_command() -> (Command, PathBuf) {
+        let pid_file = pid_file("rss");
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")
-            .arg("sleep 10 & wait")
+            .arg(format!(
+                "sleep 60 & descendant=$!; printf '%s\\n' \"$descendant\" > '{}'; wait",
+                pid_file.display()
+            ))
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        command
+        configure_containment(&mut command);
+        (command, pid_file)
     }
 
     #[cfg(windows)]
-    fn descendant_command() -> Command {
-        let mut command = Command::new("cmd");
+    fn descendant_command() -> (Command, PathBuf) {
+        let pid_file = pid_file("rss");
+        let mut command = Command::new("powershell");
         command
-            .args(["/D", "/S", "/C", "ping -n 10 127.0.0.1 >nul"])
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "$child=Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60' -PassThru; Set-Content -NoNewline -Path '{}' -Value $child.Id; Wait-Process -Id $child.Id",
+                    pid_file.display()
+                ),
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        command
+        configure_containment(&mut command);
+        (command, pid_file)
     }
 
     #[cfg(windows)]
-    fn ignores_eof_command() -> Vec<String> {
+    fn ignores_eof_command() -> (Vec<String>, PathBuf) {
+        let pid_file = pid_file("ignores-eof");
         let responses = (1..=11)
-            .map(|id| format!("echo {{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{{}}}}"))
+            .map(|id| format!("Write-Output '{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{{}}}}'"))
             .collect::<Vec<_>>()
-            .join(" & ");
+            .join("; ");
+        let script = format!(
+            "$child=Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60' -PassThru; Set-Content -NoNewline -Path '{}' -Value $child.Id; {responses}; Wait-Process -Id $child.Id",
+            pid_file.display()
+        );
+        (
+            vec![
+                "powershell".to_owned(),
+                "-NoProfile".to_owned(),
+                "-Command".to_owned(),
+                script,
+            ],
+            pid_file,
+        )
+    }
+
+    #[cfg(windows)]
+    fn exits_on_eof_command() -> Vec<String> {
+        let responses = (1..=11)
+            .map(|id| format!("Write-Output '{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{{}}}}'"))
+            .collect::<Vec<_>>()
+            .join("; ");
         vec![
-            "cmd".to_owned(),
-            "/D".to_owned(),
-            "/S".to_owned(),
-            "/C".to_owned(),
-            format!("{responses} & ping -t 127.0.0.1 >nul"),
+            "powershell".to_owned(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            format!("{responses}; $input | Out-Null"),
         ]
     }
 
     #[test]
     fn early_protocol_error_is_preserved_after_bounded_cleanup() {
+        let (command, pid_file) = early_error_command();
         let started = Instant::now();
-        let error = process_sample_with_timeout(&early_error_command(), Duration::from_millis(200))
-            .unwrap_err();
+        let error = process_sample_with_timeout(&command, Duration::from_millis(200)).unwrap_err();
+        let descendant = read_descendant_pid(&pid_file);
 
         assert!(
             error.to_string().contains("request 1 failed"),
             "original protocol error was replaced: {error:#}"
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+        assert_process_is_gone(descendant);
     }
 
     #[test]
     fn child_that_ignores_eof_is_terminated_within_the_bound() {
+        let (command, pid_file) = ignores_eof_command();
         let started = Instant::now();
-        let error = process_sample_with_timeout(&ignores_eof_command(), Duration::from_millis(200))
-            .unwrap_err();
+        let error = process_sample_with_timeout(&command, Duration::from_millis(200)).unwrap_err();
+        let descendant = read_descendant_pid(&pid_file);
 
         assert!(
             error.to_string().contains("did not exit within"),
             "unexpected cleanup error: {error:#}"
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+        assert_process_is_gone(descendant);
+    }
+
+    #[test]
+    fn child_that_exits_on_eof_is_reaped_without_a_cleanup_error() {
+        process_sample_with_timeout(&exits_on_eof_command(), Duration::from_secs(1)).unwrap();
     }
 
     #[test]
     fn rss_includes_resident_descendants_in_the_launched_process_tree() {
-        let mut child = descendant_command().spawn().unwrap();
+        let (mut command, pid_file) = descendant_command();
+        let mut child = command.spawn().unwrap();
         let root = Pid::from(child.id() as usize);
         let mut system = System::new();
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -599,11 +768,17 @@ mod tests {
 
         let aggregate_rss = process_tree_rss_bytes(&mut system, &child).unwrap();
         drop(child.stdin.take());
-        let _ = cleanup_process_tree(&mut child, Duration::from_millis(200));
+        let cleanup = cleanup_process_tree(&mut child, Duration::from_millis(200)).unwrap();
+        let descendant = read_descendant_pid(&pid_file);
 
         assert!(
             aggregate_rss > root_rss,
             "aggregate RSS {aggregate_rss} did not exceed root-only RSS {root_rss}"
         );
+        assert!(
+            cleanup.forced,
+            "stubborn descendant exited without containment cleanup"
+        );
+        assert_process_is_gone(descendant);
     }
 }
