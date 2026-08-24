@@ -14,9 +14,13 @@ use crate::{
     error::{TiingoError, sanitize_detail},
 };
 
+pub mod corporate_actions;
+pub mod crypto;
 pub mod eod;
 pub mod forex;
+pub mod fundamentals;
 pub mod iex;
+pub mod news;
 pub mod query;
 
 #[derive(Clone, Debug)]

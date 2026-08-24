@@ -49,6 +49,35 @@ impl IntradayResample {
     }
 }
 
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub enum NewsSort {
+    #[serde(rename = "crawlDate")]
+    CrawlDate,
+    #[serde(rename = "publishedDate")]
+    PublishedDate,
+}
+
+impl NewsSort {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CrawlDate => "crawlDate",
+            Self::PublishedDate => "publishedDate",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NewsQuery {
+    pub tickers: Option<String>,
+    pub tags: Option<String>,
+    pub source: Option<String>,
+    pub start_date: Option<chrono::NaiveDate>,
+    pub end_date: Option<chrono::NaiveDate>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub sort_by: Option<NewsSort>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DateRange {
     pub start_date: Option<chrono::NaiveDate>,
