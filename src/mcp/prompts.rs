@@ -124,7 +124,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
             let include_news = optional_bool(&arguments, "include_news", true)?;
             let news = if include_news {
                 format!(
-                    "5. Call get_news with tickers={ticker} to fetch recent news articles and identify key catalysts, analyst commentary, and market-moving events.\n"
+                    "5. Call get_news with tickers={ticker} to fetch recent news articles and identify reported catalysts and market-moving events.\n"
                 )
             } else {
                 "5. Skip news fetching because include_news is false.\n".to_owned()
@@ -142,7 +142,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
                  - **Company Overview**: Name, exchange, sector, and business description.\n\
                  - **Price Trend**: Recent price action, highs/lows, and percentage change over 30 days.\n\
                  - **Valuation Snapshot**: Current P/E ratio, market cap, and notable fundamental metrics.\n\
-                 - **Recent Catalysts**: Key news stories or events driving price movement (if news was fetched).\n\
+                 - **Recent Catalysts**: Reported news or events if news was fetched; do not infer causes absent evidence.\n\
                  - **Summary**: One-paragraph investment narrative combining all findings."
                 ),
             )

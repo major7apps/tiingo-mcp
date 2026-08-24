@@ -191,7 +191,7 @@ async fn rejects_unsafe_path_symbols_before_requesting_tiingo() {
     let server = MockServer::start().await;
     let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
 
-    for ticker in ["A/APL", "A?APL", "A#APL", "A%APL"] {
+    for ticker in [".", "..", "A/APL", "A?APL", "A#APL", "A%APL"] {
         let error = client.get_stock_metadata(ticker).await.unwrap_err();
         assert!(matches!(error, TiingoError::Validation(_)));
     }

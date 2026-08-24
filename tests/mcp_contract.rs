@@ -212,6 +212,47 @@ fn canonical_list(mut items: Vec<Value>, field: &str) -> Vec<Value> {
     items
 }
 
+fn canonical_resources(mut resources: Vec<Value>, expected: bool) -> Vec<Value> {
+    if expected {
+        for resource in &mut resources {
+            replace_exact(
+                resource.as_object_mut().unwrap(),
+                "mimeType",
+                Value::String("text/plain".to_owned()),
+                Value::String("application/json".to_owned()),
+            );
+            if resource["uri"] == "tiingo://capabilities" {
+                replace_exact(
+                    resource.as_object_mut().unwrap(),
+                    "description",
+                    Value::String(
+                        "Server capabilities, supported asset classes, rate limits, and plan restrictions"
+                            .to_owned(),
+                    ),
+                    Value::String(
+                        "Server capabilities and source-dated entitlement guidance".to_owned(),
+                    ),
+                );
+            }
+        }
+    }
+    canonical_list(resources, "uri")
+}
+
+fn canonical_resource_templates(mut templates: Vec<Value>, expected: bool) -> Vec<Value> {
+    if expected {
+        for template in &mut templates {
+            replace_exact(
+                template.as_object_mut().unwrap(),
+                "mimeType",
+                Value::String("text/plain".to_owned()),
+                Value::String("application/json".to_owned()),
+            );
+        }
+    }
+    canonical_list(templates, "uriTemplate")
+}
+
 fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     let object = body.as_object_mut().unwrap();
     match uri {
@@ -320,6 +361,14 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
 fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
     normalize_protocol_metadata(result.as_object_mut().unwrap());
     for content in result["contents"].as_array_mut().unwrap() {
+        if expected {
+            replace_exact(
+                content.as_object_mut().unwrap(),
+                "mimeType",
+                Value::String("text/plain".to_owned()),
+                Value::String("application/json".to_owned()),
+            );
+        }
         let mut body: Value = serde_json::from_str(content["text"].as_str().unwrap()).unwrap();
         if expected {
             body = expected_resource_body(uri, body);
@@ -344,9 +393,17 @@ fn corrected_prompt_text(name: &str, text: &str) -> String {
         "analyze-stock" => replace_exact_once(
             &replace_exact_once(
                 &replace_exact_once(
-                    text,
-                    "2. Call get_stock_prices",
-                    "2. Call get_company_meta with tickers=AAPL to retrieve sector and industry.\n3. Call get_stock_prices",
+                    &replace_exact_once(
+                        &replace_exact_once(
+                            text,
+                            "2. Call get_stock_prices",
+                            "2. Call get_company_meta with tickers=AAPL to retrieve sector and industry.\n3. Call get_stock_prices",
+                        ),
+                        "identify key catalysts, analyst commentary, and market-moving events",
+                        "identify reported catalysts and market-moving events",
+                    ),
+                    "- **Recent Catalysts**: Key news stories or events driving price movement (if news was fetched).",
+                    "- **Recent Catalysts**: Reported news or events if news was fetched; do not infer causes absent evidence.",
                 ),
                 "\n3. Call get_daily_fundamentals",
                 "\n4. Call get_daily_fundamentals",
@@ -431,8 +488,8 @@ async fn child_process_contract() -> anyhow::Result<()> {
         .unwrap()
         .clone();
     assert_eq!(
-        canonical_list(actual_resources, "uri"),
-        canonical_list(baseline["resources"].as_array().unwrap().clone(), "uri"),
+        canonical_resources(actual_resources, false),
+        canonical_resources(baseline["resources"].as_array().unwrap().clone(), true),
         "resource discovery drifted"
     );
     let actual_templates = serde_json::to_value(client.list_all_resource_templates().await?)?
@@ -440,10 +497,10 @@ async fn child_process_contract() -> anyhow::Result<()> {
         .unwrap()
         .clone();
     assert_eq!(
-        canonical_list(actual_templates, "uriTemplate"),
-        canonical_list(
+        canonical_resource_templates(actual_templates, false),
+        canonical_resource_templates(
             baseline["resource_templates"].as_array().unwrap().clone(),
-            "uriTemplate"
+            true
         ),
         "resource-template discovery drifted"
     );
@@ -580,6 +637,37 @@ fn canonicalization_preserves_unapproved_metadata() {
 }
 
 #[test]
+fn approved_resource_discovery_delta_rejects_mutated_frozen_source() {
+    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+    let mut resources = baseline["resources"].as_array().unwrap().clone();
+    resources[0]["mimeType"] = Value::String("application/json".to_owned());
+    assert_transform_rejects("resource MIME type", move || {
+        canonical_resources(resources, true);
+    });
+
+    let mut resources = baseline["resources"].as_array().unwrap().clone();
+    resources[0]["description"] =
+        Value::String("Server capabilities and source-dated entitlement guidance".to_owned());
+    assert_transform_rejects("capabilities description", move || {
+        canonical_resources(resources, true);
+    });
+
+    let mut templates = baseline["resource_templates"].as_array().unwrap().clone();
+    templates[0]["mimeType"] = Value::String("application/json".to_owned());
+    assert_transform_rejects("resource template MIME type", move || {
+        canonical_resource_templates(templates, true);
+    });
+
+    let mut contents = serde_json::json!({
+        "contents": baseline["resource_contents"]["tiingo://capabilities"].clone()
+    });
+    contents["contents"][0]["mimeType"] = Value::String("application/json".to_owned());
+    assert_transform_rejects("resource content MIME type", move || {
+        canonical_resource_result("tiingo://capabilities", contents, true);
+    });
+}
+
+#[test]
 fn approved_output_schema_delta_rejects_a_mutated_frozen_source() {
     let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
     let mut tools = baseline["tools"].as_array().unwrap().clone();
@@ -689,8 +777,8 @@ fn every_approved_delta_rejects_mutated_frozen_values() {
     for (name, old, replacement) in [
         (
             "analyze-stock",
-            "2. Call get_stock_prices",
-            "2. Call mutated_stock_prices",
+            "identify key catalysts, analyst commentary, and market-moving events",
+            "identify mutated catalysts",
         ),
         (
             "earnings-report-analysis",
@@ -711,4 +799,15 @@ fn every_approved_delta_rejects_mutated_frozen_values() {
             corrected_prompt_text(name, &text);
         });
     }
+
+    let text = baseline["prompt_results"]["analyze-stock"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap()
+        .replace(
+            "- **Recent Catalysts**: Key news stories or events driving price movement (if news was fetched).",
+            "- **Recent Catalysts**: Mutated.",
+        );
+    assert_transform_rejects("analyze-stock evidence qualification", move || {
+        corrected_prompt_text("analyze-stock", &text);
+    });
 }

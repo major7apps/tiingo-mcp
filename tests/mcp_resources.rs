@@ -87,6 +87,15 @@ async fn advertises_and_reads_corrected_legacy_resources() {
             .collect::<Vec<_>>(),
         FIXED_URIS,
     );
+    assert!(
+        resources
+            .iter()
+            .all(|resource| resource.mime_type.as_deref() == Some("application/json"))
+    );
+    assert_eq!(
+        resources[0].description.as_deref(),
+        Some("Server capabilities and source-dated entitlement guidance")
+    );
 
     let templates = connection
         .client
@@ -96,12 +105,17 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         .resource_templates;
     assert_eq!(templates.len(), 1);
     assert_eq!(templates[0].uri_template, "tiingo://guide/{asset_class}");
+    assert_eq!(templates[0].mime_type.as_deref(), Some("application/json"));
 
     let capabilities = connection
         .client
         .read_resource(ReadResourceRequestParams::new("tiingo://capabilities"))
         .await
         .unwrap();
+    let ResourceContents::TextResourceContents { mime_type, .. } = &capabilities.contents[0] else {
+        panic!("capabilities must return text content");
+    };
+    assert_eq!(mime_type.as_deref(), Some("application/json"));
     let capabilities = json_text(&capabilities);
     assert_eq!(capabilities["server_version"], "2.0.0");
     assert_eq!(capabilities["tool_count"], 17);
@@ -122,6 +136,10 @@ async fn advertises_and_reads_corrected_legacy_resources() {
             )))
             .await
             .unwrap();
+        let ResourceContents::TextResourceContents { mime_type, .. } = &result.contents[0] else {
+            panic!("guide must return text content");
+        };
+        assert_eq!(mime_type.as_deref(), Some("application/json"));
         assert!(
             json_text(&result).is_object(),
             "{asset_class} must return JSON"
@@ -133,6 +151,10 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         .read_resource(ReadResourceRequestParams::new("tiingo://guide/invalid"))
         .await
         .unwrap();
+    let ResourceContents::TextResourceContents { mime_type, .. } = &invalid.contents[0] else {
+        panic!("invalid guide response must return text content");
+    };
+    assert_eq!(mime_type.as_deref(), Some("application/json"));
     assert_eq!(
         json_text(&invalid),
         serde_json::json!({
@@ -150,6 +172,10 @@ async fn advertises_and_reads_corrected_legacy_resources() {
             .read_resource(ReadResourceRequestParams::new(uri))
             .await
             .unwrap();
+        let ResourceContents::TextResourceContents { mime_type, .. } = &result.contents[0] else {
+            panic!("fixed resource must return text content");
+        };
+        assert_eq!(mime_type.as_deref(), Some("application/json"));
         contents.push(json_text(&result).to_string());
     }
     for asset_class in GUIDES {

@@ -164,6 +164,12 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         .unwrap();
     let analyze_text = text(&analyze);
     assert!(analyze_text.contains("get_news with tickers=AAPL"));
+    assert!(analyze_text.contains("identify reported catalysts and market-moving events"));
+    assert!(analyze_text.contains(
+        "**Recent Catalysts**: Reported news or events if news was fetched; do not infer causes absent evidence."
+    ));
+    assert!(!analyze_text.contains("identify key catalysts"));
+    assert!(!analyze_text.contains("driving price movement"));
     assert!(
         analyze_text.find("get_company_meta").unwrap()
             < analyze_text.find("sector and industry").unwrap()

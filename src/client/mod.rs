@@ -87,7 +87,11 @@ impl TiingoClient {
             {
                 Ok(value) => return Ok(value),
                 Err(failure) if failure.retryable && attempt < self.config.retry.max_attempts => {
-                    let delay = retry_delay(failure.retry_after, self.backoff(attempt));
+                    let delay = retry_delay(
+                        failure.retry_after,
+                        self.backoff(attempt),
+                        self.config.retry.max_delay,
+                    );
                     last_error = Some(failure.error);
                     tokio::time::sleep(delay).await;
                 }
@@ -217,8 +221,8 @@ fn parse_retry_after(value: &HeaderValue) -> Option<Duration> {
         .ok()
 }
 
-fn retry_delay(retry_after: Option<Duration>, fallback: Duration) -> Duration {
-    retry_after.unwrap_or(fallback)
+fn retry_delay(retry_after: Option<Duration>, fallback: Duration, max_delay: Duration) -> Duration {
+    retry_after.unwrap_or(fallback).min(max_delay)
 }
 
 async fn bounded_error_text(
@@ -246,11 +250,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid_retry_after_is_not_capped() {
-        let retry_after = parse_retry_after(&HeaderValue::from_static("60"));
+    fn retry_delays_are_capped_by_policy_max_delay() {
+        let max_delay = Duration::from_secs(30);
+
+        let huge_numeric = parse_retry_after(&HeaderValue::from_static("999999"));
         assert_eq!(
-            retry_delay(retry_after, Duration::ZERO),
-            Duration::from_secs(60)
+            retry_delay(huge_numeric, Duration::ZERO, max_delay),
+            max_delay
+        );
+
+        let far_future =
+            parse_retry_after(&HeaderValue::from_static("Wed, 21 Oct 2099 07:28:00 GMT"));
+        assert_eq!(
+            retry_delay(far_future, Duration::ZERO, max_delay),
+            max_delay
+        );
+
+        let below_cap = parse_retry_after(&HeaderValue::from_static("17"));
+        assert_eq!(
+            retry_delay(below_cap, Duration::ZERO, max_delay),
+            Duration::from_secs(17)
+        );
+
+        assert_eq!(
+            retry_delay(None, Duration::from_secs(60), max_delay),
+            max_delay
         );
     }
 }

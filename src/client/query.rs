@@ -97,6 +97,7 @@ impl DateRange {
 
 pub fn validate_path_segment(value: &str) -> Result<(), TiingoError> {
     if value.is_empty()
+        || matches!(value, "." | "..")
         || !value.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | ':')
         })

@@ -18,10 +18,8 @@ const GUIDE_STOCKS: &str = include_str!("data/guides/stocks.json");
 pub fn list() -> Vec<Resource> {
     vec![
         Resource::new("tiingo://capabilities", "capabilities_resource")
-            .with_description(
-                "Server capabilities, supported asset classes, rate limits, and plan restrictions",
-            )
-            .with_mime_type("text/plain")
+            .with_description("Server capabilities and source-dated entitlement guidance")
+            .with_mime_type("application/json")
             .with_meta(compatibility_descriptor_meta()),
         Resource::new(
             "tiingo://fundamentals/definitions",
@@ -30,13 +28,13 @@ pub fn list() -> Vec<Resource> {
         .with_description(
             "Curated reference of common fundamental metrics with descriptions and statement types",
         )
-        .with_mime_type("text/plain")
+        .with_mime_type("application/json")
         .with_meta(compatibility_descriptor_meta()),
         Resource::new("tiingo://guide/date-formats", "date_formats_resource")
             .with_description(
                 "Date format, resample frequencies, sort options, and parameter reference for all endpoints",
             )
-            .with_mime_type("text/plain")
+            .with_mime_type("application/json")
             .with_meta(compatibility_descriptor_meta()),
     ]
 }
@@ -50,7 +48,7 @@ pub fn templates() -> Vec<ResourceTemplate> {
         .with_description(
             "Usage guide for a specific asset class: tools, workflows, ticker formats, and pitfalls",
         )
-        .with_mime_type("text/plain")
+        .with_mime_type("application/json")
         .with_meta(compatibility_descriptor_meta()),
     ]
 }
@@ -74,7 +72,7 @@ pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
                 )
             });
             return Ok(ReadResourceResult::new(vec![
-                ResourceContents::text(error.to_string(), uri).with_mime_type("text/plain"),
+                ResourceContents::text(error.to_string(), uri).with_mime_type("application/json"),
             ]));
         }
         _ => {
@@ -85,6 +83,6 @@ pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
         }
     };
     Ok(ReadResourceResult::new(vec![
-        ResourceContents::text(json, uri).with_mime_type("text/plain"),
+        ResourceContents::text(json, uri).with_mime_type("application/json"),
     ]))
 }
