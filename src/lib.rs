@@ -1,3 +1,6 @@
+pub mod client;
+pub mod config;
+pub mod error;
 pub mod mcp;
 
 use rmcp::{ServiceExt, transport::stdio};
