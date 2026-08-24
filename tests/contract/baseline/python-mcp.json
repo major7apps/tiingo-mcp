@@ -1,0 +1,1536 @@
+{
+  "errors": {
+    "401": {
+      "detail": "Invalid API key or insufficient permissions.",
+      "exception": "TiingoAPIError",
+      "message": "Tiingo API error 401: Invalid API key or insufficient permissions.",
+      "status_code": 401
+    },
+    "403": {
+      "detail": "Access denied for /tiingo/daily/AAPL. This endpoint may require a higher Tiingo plan (Power or Business).",
+      "exception": "TiingoAPIError",
+      "message": "Tiingo API error 403: Access denied for /tiingo/daily/AAPL. This endpoint may require a higher Tiingo plan (Power or Business).",
+      "status_code": 403
+    },
+    "404": {
+      "detail": "Resource not found: /tiingo/daily/AAPL",
+      "exception": "TiingoAPIError",
+      "message": "Tiingo API error 404: Resource not found: /tiingo/daily/AAPL",
+      "status_code": 404
+    },
+    "429": {
+      "detail": "Rate limit exceeded. Please wait before retrying.",
+      "exception": "TiingoAPIError",
+      "message": "Tiingo API error 429: Rate limit exceeded. Please wait before retrying.",
+      "status_code": 429
+    },
+    "500": {
+      "detail": "status 500",
+      "exception": "TiingoAPIError",
+      "message": "Tiingo API error 500: status 500",
+      "status_code": 500
+    },
+    "malformed_json": {
+      "detail": null,
+      "exception": "JSONDecodeError",
+      "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+      "status_code": null
+    },
+    "timeout": {
+      "detail": null,
+      "exception": "ReadTimeout",
+      "message": "captured timeout",
+      "status_code": null
+    }
+  },
+  "http_requests": [
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/daily/AAPL",
+      "query": []
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/daily/AAPL/prices",
+      "query": [
+        [
+          "endDate",
+          "2024-01-31"
+        ],
+        [
+          "resampleFreq",
+          "weekly"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/iex/AAPL",
+      "query": [
+        [
+          "afterHours",
+          "true"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/iex/AAPL/prices",
+      "query": [
+        [
+          "endDate",
+          "2024-01-02"
+        ],
+        [
+          "resampleFreq",
+          "5min"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fx/eurusd/top",
+      "query": []
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fx/eurusd/prices",
+      "query": [
+        [
+          "endDate",
+          "2024-01-02"
+        ],
+        [
+          "resampleFreq",
+          "1day"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/crypto/top",
+      "query": [
+        [
+          "tickers",
+          "btcusd"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/crypto/prices",
+      "query": [
+        [
+          "endDate",
+          "2024-01-02"
+        ],
+        [
+          "resampleFreq",
+          "1hour"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ],
+        [
+          "tickers",
+          "btcusd"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/crypto",
+      "query": [
+        [
+          "tickers",
+          "btcusd"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/news",
+      "query": [
+        [
+          "endDate",
+          "2024-01-31"
+        ],
+        [
+          "limit",
+          "10"
+        ],
+        [
+          "offset",
+          "5"
+        ],
+        [
+          "sortBy",
+          "publishedDate"
+        ],
+        [
+          "source",
+          "reuters"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ],
+        [
+          "tags",
+          "earnings"
+        ],
+        [
+          "tickers",
+          "AAPL"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fundamentals/definitions",
+      "query": []
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fundamentals/AAPL/statements",
+      "query": [
+        [
+          "endDate",
+          "2024-01-31"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fundamentals/AAPL/daily",
+      "query": [
+        [
+          "endDate",
+          "2024-01-31"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/fundamentals/meta",
+      "query": [
+        [
+          "tickers",
+          "AAPL"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/corporate-actions/AAPL/distributions",
+      "query": [
+        [
+          "endExDate",
+          "2024-01-31"
+        ],
+        [
+          "startExDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/corporate-actions/AAPL/distribution-yield",
+      "query": [
+        [
+          "endDate",
+          "2024-01-31"
+        ],
+        [
+          "startDate",
+          "2024-01-01"
+        ]
+      ]
+    },
+    {
+      "authorization_scheme": "Token",
+      "method": "GET",
+      "path": "/tiingo/corporate-actions/AAPL/splits",
+      "query": [
+        [
+          "endExDate",
+          "2024-01-31"
+        ],
+        [
+          "startExDate",
+          "2024-01-01"
+        ]
+      ]
+    }
+  ],
+  "initialize": {
+    "capabilities": {
+      "experimental": {},
+      "extensions": {
+        "io.modelcontextprotocol/ui": {}
+      },
+      "logging": {},
+      "prompts": {
+        "listChanged": true
+      },
+      "resources": {
+        "listChanged": true,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": true
+      }
+    },
+    "instructions": "Financial data server powered by Tiingo. Provides real-time and historical stock prices, forex rates, crypto data, news, fundamentals, and corporate actions. All date parameters use YYYY-MM-DD format.",
+    "protocolVersion": "2025-11-25",
+    "serverInfo": {
+      "name": "Tiingo MCP Server",
+      "version": "1.1.0"
+    }
+  },
+  "prompt_results": {
+    "analyze-stock": {
+      "description": "Comprehensive single-stock analysis: metadata, prices, fundamentals, and news",
+      "messages": [
+        {
+          "content": {
+            "text": "Please perform a comprehensive analysis of AAPL using the following steps:\n\n1. Call get_stock_metadata for AAPL to retrieve company name, exchange, description, and available date range.\n2. Call get_stock_prices for AAPL with a start_date 30 days ago to get recent end-of-day OHLCV price history.\n3. Call get_daily_fundamentals for AAPL with a start_date 30 days ago to retrieve P/E ratio, market cap, and other valuation metrics.\n4. Call get_news with tickers=AAPL to fetch recent news articles and identify key catalysts, analyst commentary, and market-moving events.\n\nSynthesize the results into a structured report with these sections:\n- **Company Overview**: Name, exchange, sector, and business description.\n- **Price Trend**: Recent price action, highs/lows, and percentage change over 30 days.\n- **Valuation Snapshot**: Current P/E ratio, market cap, and notable fundamental metrics.\n- **Recent Catalysts**: Key news stories or events driving price movement (if news was fetched).\n- **Summary**: One-paragraph investment narrative combining all findings.",
+            "type": "text"
+          },
+          "role": "user"
+        }
+      ]
+    },
+    "compare-stocks": {
+      "description": "Side-by-side comparison of two stocks: prices, fundamentals, and performance",
+      "messages": [
+        {
+          "content": {
+            "text": "Please perform a side-by-side comparison of AAPL and MSFT over the past 3 months.\n\nFetch the following data for each ticker:\n1. Call get_stock_prices for AAPL and get_stock_prices for MSFT covering the past 3 months to compare price performance.\n2. Call get_daily_fundamentals for AAPL and get_daily_fundamentals for MSFT to retrieve P/E ratios and market caps.\n3. Call get_dividend_yield for AAPL and get_dividend_yield for MSFT to compare dividend income.\n\nProduce a comparative analysis including:\n- A table comparing: price performance (%), P/E ratio, market cap, and dividend yield.\n- Which of AAPL or MSFT has stronger momentum over the period.\n- Relative valuation: which appears cheaper on a P/E basis.\n- Income comparison: dividend yield difference.\n- A brief recommendation on which stock looks more attractive and why.",
+            "type": "text"
+          },
+          "role": "user"
+        }
+      ]
+    },
+    "crypto-market-overview": {
+      "description": "Crypto market snapshot: current prices, 24h changes, and 7-day trends",
+      "messages": [
+        {
+          "content": {
+            "text": "Please provide a crypto market overview for the following tickers: btcusd,ethusd,solusd.\n\nFetch the following data:\n1. Call get_crypto_quote with tickers=btcusd,ethusd,solusd to get current prices, 24-hour volume, and latest bid/ask.\n2. Call get_crypto_prices for btcusd,ethusd,solusd with a start_date 7 days ago to retrieve 7-day price history for trend analysis.\n\nSummarize the results as a market snapshot:\n- **Current Prices**: Latest price for each ticker.\n- **24h Change**: Estimated price change over the past 24 hours based on available data.\n- **7-Day Trend**: Direction (up/down/flat) and percentage change for each ticker over the past 7 days.\n- **Market Narrative**: A brief paragraph on overall crypto market sentiment based on the data.",
+            "type": "text"
+          },
+          "role": "user"
+        }
+      ]
+    },
+    "earnings-report-analysis": {
+      "description": "Analyze a stock's earnings report: financials, price reaction, and news sentiment",
+      "messages": [
+        {
+          "content": {
+            "text": "Please analyze the earnings report for NVDA around the date 2024-02-21.\n\nFetch the following data:\n1. Call get_financial_statements for NVDA with a date range spanning approximately 3 months before and after 2024-02-21 to retrieve the relevant quarterly income statement, balance sheet, and cash flow data.\n2. Call get_stock_prices for NVDA with a start_date 2 weeks before 2024-02-21 and end_date 2 weeks after 2024-02-21 to capture the price reaction around the earnings event.\n3. Call get_news with tickers=NVDA and a date range 1 week before and after 2024-02-21 to gather analyst reactions, guidance commentary, and post-earnings sentiment.\n\nSynthesize the findings into:\n- **Financial Results**: Key metrics from the earnings report (revenue, net income, EPS, margins).\n- **Beat or Miss**: Did the company beat or miss expectations based on trends?\n- **Price Reaction**: How the stock moved in the 2 weeks before and after earnings.\n- **News Sentiment**: Summary of analyst and media reaction from the news data.\n- **Outlook**: Any forward guidance or notable commentary from the news articles.",
+            "type": "text"
+          },
+          "role": "user"
+        }
+      ]
+    },
+    "forex-pair-analysis": {
+      "description": "Currency pair analysis: current rate, historical trend, and volatility",
+      "messages": [
+        {
+          "content": {
+            "text": "Please perform a currency pair analysis for eurusd over the past 1 month.\n\nFetch the following data:\n1. Call get_forex_quote for eurusd to get the current top-of-book bid, ask, and mid price.\n2. Call get_forex_prices for eurusd with a start_date 1 month ago and resample_freq='1day' to retrieve daily OHLCV history for the period.\n\nAnalyze and present:\n- **Current Rate**: Latest bid/ask spread and mid price for the pair.\n- **Trend over 1 month**: Direction and magnitude of the rate change, identifying key support/resistance levels.\n- **Volatility**: Daily price range analysis \u2014 average true range or high-low spread over the period.\n- **Notable Moves**: Any significant spikes or drops and their likely causes.\n- **Summary**: One-paragraph assessment of the pair's current momentum and near-term outlook.",
+            "type": "text"
+          },
+          "role": "user"
+        }
+      ]
+    }
+  },
+  "prompts": [
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "arguments": [
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "ticker",
+          "required": true
+        },
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"boolean\"}",
+          "name": "include_news",
+          "required": false
+        }
+      ],
+      "description": "Comprehensive single-stock analysis: metadata, prices, fundamentals, and news",
+      "name": "analyze-stock"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "arguments": [
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "ticker1",
+          "required": true
+        },
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "ticker2",
+          "required": true
+        },
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "period",
+          "required": false
+        }
+      ],
+      "description": "Side-by-side comparison of two stocks: prices, fundamentals, and performance",
+      "name": "compare-stocks"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "arguments": [
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "tickers",
+          "required": false
+        }
+      ],
+      "description": "Crypto market snapshot: current prices, 24h changes, and 7-day trends",
+      "name": "crypto-market-overview"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "arguments": [
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "ticker",
+          "required": true
+        },
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "earnings_date",
+          "required": true
+        }
+      ],
+      "description": "Analyze a stock's earnings report: financials, price reaction, and news sentiment",
+      "name": "earnings-report-analysis"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "arguments": [
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "pair",
+          "required": true
+        },
+        {
+          "description": "Provide as a JSON string matching the following schema: {\"type\":\"string\"}",
+          "name": "period",
+          "required": false
+        }
+      ],
+      "description": "Currency pair analysis: current rate, historical trend, and volatility",
+      "name": "forex-pair-analysis"
+    }
+  ],
+  "resource_contents": {
+    "tiingo://capabilities": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"server_name\": \"Tiingo MCP Server\", \"server_version\": \"1.1.0\", \"asset_classes\": {\"stocks\": {\"description\": \"US and international equities\", \"data_types\": [\"eod_prices\", \"intraday_prices\", \"realtime_quote\", \"metadata\"]}, \"forex\": {\"description\": \"Foreign exchange currency pairs\", \"data_types\": [\"realtime_quote\", \"historical_prices\"]}, \"crypto\": {\"description\": \"Cryptocurrencies across exchanges\", \"data_types\": [\"realtime_quote\", \"historical_prices\", \"metadata\"]}}, \"rate_limits\": {\"free\": \"50 req/hr\", \"power\": \"5000 req/hr\"}, \"plan_restrictions\": {\"free_tier\": [\"get_stock_metadata\", \"get_stock_prices\", \"get_realtime_price\", \"get_intraday_prices\", \"get_forex_quote\", \"get_forex_prices\", \"get_crypto_quote\", \"get_crypto_prices\", \"get_crypto_metadata\", \"get_news\", \"get_fundamentals_definitions\", \"get_financial_statements\", \"get_daily_fundamentals\", \"get_company_meta\", \"get_dividend_yield\"], \"paid_tier_required\": [\"get_dividends\", \"get_splits\"]}, \"tool_count\": 17}",
+        "uri": "tiingo://capabilities"
+      }
+    ],
+    "tiingo://fundamentals/definitions": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"description\": \"Curated reference of common Tiingo fundamental metrics. Use get_fundamentals_definitions tool to fetch the full live list from the API.\", \"metrics\": [{\"name\": \"marketCap\", \"description\": \"Market capitalisation (shares outstanding x price)\", \"statement_type\": \"overview\"}, {\"name\": \"peRatio\", \"description\": \"Price-to-earnings ratio (price / trailing EPS)\", \"statement_type\": \"overview\"}, {\"name\": \"pbRatio\", \"description\": \"Price-to-book ratio (price / book value per share)\", \"statement_type\": \"overview\"}, {\"name\": \"trailingPEG1Y\", \"description\": \"Trailing PEG ratio over 1 year (P/E / earnings growth rate)\", \"statement_type\": \"overview\"}, {\"name\": \"revenue\", \"description\": \"Total revenue (net sales)\", \"statement_type\": \"income_statement\"}, {\"name\": \"costRev\", \"description\": \"Cost of revenue (cost of goods sold)\", \"statement_type\": \"income_statement\"}, {\"name\": \"grossProfit\", \"description\": \"Gross profit (revenue - cost of revenue)\", \"statement_type\": \"income_statement\"}, {\"name\": \"operatingIncome\", \"description\": \"Operating income (EBIT before interest and taxes)\", \"statement_type\": \"income_statement\"}, {\"name\": \"netIncome\", \"description\": \"Net income attributable to common shareholders\", \"statement_type\": \"income_statement\"}, {\"name\": \"eps\", \"description\": \"Basic earnings per share\", \"statement_type\": \"income_statement\"}, {\"name\": \"epsDil\", \"description\": \"Diluted earnings per share\", \"statement_type\": \"income_statement\"}, {\"name\": \"totalAssets\", \"description\": \"Total assets\", \"statement_type\": \"balance_sheet\"}, {\"name\": \"totalLiabilities\", \"description\": \"Total liabilities\", \"statement_type\": \"balance_sheet\"}, {\"name\": \"totalEquity\", \"description\": \"Total shareholders equity\", \"statement_type\": \"balance_sheet\"}, {\"name\": \"totalDebt\", \"description\": \"Total debt (short-term + long-term borrowings)\", \"statement_type\": \"balance_sheet\"}, {\"name\": \"totalCash\", \"description\": \"Cash and cash equivalents\", \"statement_type\": \"balance_sheet\"}, {\"name\": \"operatingCashFlow\", \"description\": \"Net cash from operating activities\", \"statement_type\": \"cash_flow\"}, {\"name\": \"investingCashFlow\", \"description\": \"Net cash from investing activities\", \"statement_type\": \"cash_flow\"}, {\"name\": \"financingCashFlow\", \"description\": \"Net cash from financing activities\", \"statement_type\": \"cash_flow\"}, {\"name\": \"freeCashFlow\", \"description\": \"Free cash flow (operating cash flow - capital expenditures)\", \"statement_type\": \"cash_flow\"}]}",
+        "uri": "tiingo://fundamentals/definitions"
+      }
+    ],
+    "tiingo://guide/corporate-actions": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"corporate-actions\", \"description\": \"Dividends, dividend yield history, and stock splits for equities and ETFs.\", \"tools\": [\"get_dividends\", \"get_dividend_yield\", \"get_splits\"], \"ticker_format\": \"Uppercase symbols, e.g. AAPL, SPY, TSLA\", \"workflows\": [\"Use get_dividends for historical cash distributions; dates filter by ex-dividend date.\", \"Use get_dividend_yield for time-series of yield percentage.\", \"Use get_splits for historical split events; dates filter by ex-split date.\", \"For dividends and splits, start_date/end_date map to startExDate/endExDate internally.\", \"For dividend_yield, start_date/end_date map to startDate/endDate.\"], \"plan_restrictions\": \"get_dividends and get_splits return 403 on free tier; get_dividend_yield is available on free tier.\", \"common_pitfalls\": [\"get_dividends and get_splits require a paid plan -- free tier returns 403.\", \"Date params for dividends/splits filter by ex-date, not payment date.\", \"ETFs (e.g. SPY, QQQ) have dividend data via get_dividends.\"]}",
+        "uri": "tiingo://guide/corporate-actions"
+      }
+    ],
+    "tiingo://guide/crypto": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"crypto\", \"description\": \"Cryptocurrency prices, metadata, and historical data across exchanges.\", \"tools\": [\"get_crypto_quote\", \"get_crypto_prices\", \"get_crypto_metadata\"], \"ticker_format\": \"Lowercase base+quote, e.g. btcusd, ethusd, solusd\", \"workflows\": [\"Use get_crypto_metadata to discover available tickers and supported exchanges.\", \"Use get_crypto_quote for current prices; omit tickers to get all supported cryptos.\", \"Use get_crypto_prices for historical OHLCV data at various intraday or daily intervals.\", \"Pass comma-separated tickers to get_crypto_prices for multiple assets at once.\"], \"plan_restrictions\": \"Available on free tier.\", \"common_pitfalls\": [\"Crypto tickers are lowercase (btcusd, not BTCUSD).\", \"Crypto trades 24/7 -- no market-hours limitation.\", \"get_crypto_quote with no tickers returns a large payload; filter by tickers when possible.\"]}",
+        "uri": "tiingo://guide/crypto"
+      }
+    ],
+    "tiingo://guide/date-formats": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"date_format\": \"YYYY-MM-DD\", \"resample_frequencies\": {\"stocks_eod\": [\"daily\", \"weekly\", \"monthly\", \"annually\"], \"intraday\": [\"1min\", \"5min\", \"15min\", \"30min\", \"1hour\"], \"forex\": [\"1min\", \"5min\", \"15min\", \"30min\", \"1hour\", \"1day\"], \"crypto\": [\"1min\", \"5min\", \"15min\", \"30min\", \"1hour\", \"1day\"]}, \"news_sort_options\": [\"crawlDate\", \"publishedDate\"], \"corporate_actions_date_params\": {\"note\": \"Dividends and splits filter by ex-date; dividend_yield filters by calendar date.\", \"dividends_and_splits\": {\"start_date_maps_to\": \"startExDate\", \"end_date_maps_to\": \"endExDate\"}, \"dividend_yield\": {\"start_date_maps_to\": \"startDate\", \"end_date_maps_to\": \"endDate\"}}}",
+        "uri": "tiingo://guide/date-formats"
+      }
+    ],
+    "tiingo://guide/forex": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"forex\", \"description\": \"Foreign exchange currency pairs with real-time quotes and historical prices.\", \"tools\": [\"get_forex_quote\", \"get_forex_prices\"], \"ticker_format\": \"Lowercase concatenated pair, e.g. eurusd, gbpusd, usdjpy\", \"workflows\": [\"Use get_forex_quote for the current top-of-book bid/ask for a pair.\", \"Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling.\"], \"plan_restrictions\": \"Available on free tier.\", \"common_pitfalls\": [\"Tickers must be lowercase (eurusd, not EURUSD).\", \"Forex market is 24/5 -- weekends have no data.\", \"resample_freq '1day' is distinct from EOD stock resampling.\"]}",
+        "uri": "tiingo://guide/forex"
+      }
+    ],
+    "tiingo://guide/fundamentals": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"fundamentals\", \"description\": \"Company financial statements, daily fundamental metrics, definitions, and company metadata.\", \"tools\": [\"get_fundamentals_definitions\", \"get_financial_statements\", \"get_daily_fundamentals\", \"get_company_meta\"], \"ticker_format\": \"Uppercase symbols, e.g. AAPL, MSFT\", \"workflows\": [\"Call get_fundamentals_definitions once to understand available metrics and their types.\", \"Use get_financial_statements for quarterly/annual income, balance sheet, and cash flow data.\", \"Use get_daily_fundamentals for time-series of daily metrics like marketCap and P/E ratio.\", \"Use get_company_meta for sector, industry, country, and SIC code; supports multiple tickers.\"], \"plan_restrictions\": \"All fundamentals endpoints available on free tier.\", \"common_pitfalls\": [\"Financial statements are reported quarterly; don't expect daily granularity.\", \"get_daily_fundamentals returns many rows -- use start_date/end_date to limit results.\", \"get_company_meta accepts comma-separated tickers for batch lookups.\"]}",
+        "uri": "tiingo://guide/fundamentals"
+      }
+    ],
+    "tiingo://guide/news": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"news\", \"description\": \"Financial news articles from 50M+ sources, filterable by ticker, tag, and source.\", \"tools\": [\"get_news\"], \"ticker_format\": \"Comma-separated uppercase symbols, e.g. AAPL,MSFT\", \"workflows\": [\"Filter by tickers to get company-specific news; multiple tickers = OR logic.\", \"Filter by tags for topic-based news (e.g. earnings, dividends).\", \"Use start_date/end_date to restrict date range; default returns most recent.\", \"Paginate with limit and offset for large result sets.\", \"Use sort_by='crawlDate' for recency or 'publishedDate' for article publish date.\"], \"plan_restrictions\": \"Available on free tier.\", \"common_pitfalls\": [\"Default limit is 10 articles -- increase for broader searches.\", \"Omitting tickers returns broad market news, not company-specific.\", \"sort_by values are crawlDate and publishedDate (exact case required).\"]}",
+        "uri": "tiingo://guide/news"
+      }
+    ],
+    "tiingo://guide/stocks": [
+      {
+        "mimeType": "text/plain",
+        "text": "{\"asset_class\": \"stocks\", \"description\": \"US and international equities with EOD historical prices, real-time IEX quotes, and intraday data.\", \"tools\": [\"get_stock_metadata\", \"get_stock_prices\", \"get_realtime_price\", \"get_intraday_prices\"], \"ticker_format\": \"Uppercase symbols, e.g. AAPL, MSFT, GOOGL, BRK.B\", \"workflows\": [\"Fetch metadata first with get_stock_metadata to verify ticker validity and date range.\", \"Use get_stock_prices for EOD OHLCV history; supports daily/weekly/monthly/annually resampling.\", \"Use get_realtime_price for current IEX top-of-book price during market hours.\", \"Use get_intraday_prices for sub-daily data at 1min, 5min, 15min, 30min, or 1hour intervals.\"], \"plan_restrictions\": \"All stock endpoints available on free tier.\", \"common_pitfalls\": [\"Ticker symbols are case-sensitive in the URL -- always uppercase.\", \"Intraday data is limited to recent history; check metadata for available date range.\", \"get_realtime_price may return stale data outside market hours unless after_hours=True.\"]}",
+        "uri": "tiingo://guide/stocks"
+      }
+    ]
+  },
+  "resource_templates": [
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Usage guide for a specific asset class: tools, workflows, ticker formats, and pitfalls",
+      "mimeType": "text/plain",
+      "name": "asset_class_guide_resource",
+      "uriTemplate": "tiingo://guide/{asset_class}"
+    }
+  ],
+  "resources": [
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Server capabilities, supported asset classes, rate limits, and plan restrictions",
+      "mimeType": "text/plain",
+      "name": "capabilities_resource",
+      "uri": "tiingo://capabilities"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Curated reference of common fundamental metrics with descriptions and statement types",
+      "mimeType": "text/plain",
+      "name": "fundamentals_definitions_resource",
+      "uri": "tiingo://fundamentals/definitions"
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Date format, resample frequencies, sort options, and parameter reference for all endpoints",
+      "mimeType": "text/plain",
+      "name": "date_formats_resource",
+      "uri": "tiingo://guide/date-formats"
+    }
+  ],
+  "server_discover": {
+    "error": {
+      "code": -32602,
+      "data": "",
+      "message": "Invalid request parameters"
+    }
+  },
+  "tools": [
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get metadata for a stock ticker including name, exchange, description, and date range.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL, MSFT, GOOGL).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_stock_metadata",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical end-of-day stock prices with adjusted and unadjusted OHLCV data.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency \u2014 daily, weekly, monthly, or annually.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resample_freq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_stock_prices",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get the current real-time IEX top-of-book price for a stock.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    after_hours: Include after-hours pricing data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after_hours": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_realtime_price",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical intraday prices from IEX at various intervals.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency \u2014 1min, 5min, 15min, 30min, 1hour, etc.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resample_freq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_intraday_prices",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get the current top-of-book forex quote for a currency pair.\n\nArgs:\n    ticker: Currency pair (e.g. eurusd, gbpusd, usdjpy).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_forex_quote",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical forex prices for a currency pair.\n\nArgs:\n    ticker: Currency pair (e.g. eurusd, gbpusd, usdjpy).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency \u2014 1min, 5min, 15min, 30min, 1hour, 1day.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resample_freq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_forex_prices",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get current top-of-book crypto prices.\n\nReturns data for all supported cryptos if no tickers specified.\n\nArgs:\n    tickers: Comma-separated crypto tickers (e.g. btcusd, ethusd). Omit for all.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "tickers": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_crypto_quote",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical crypto prices.\n\nArgs:\n    tickers: Comma-separated crypto tickers (e.g. btcusd, ethusd).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency \u2014 1min, 5min, 15min, 30min, 1hour, 1day.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resample_freq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tickers": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tickers"
+        ],
+        "type": "object"
+      },
+      "name": "get_crypto_prices",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get metadata for crypto tickers including supported exchanges and pairs.\n\nArgs:\n    tickers: Comma-separated crypto tickers to filter by. Omit for all.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "tickers": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_crypto_metadata",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Search financial news articles from 50M+ sources.\n\nArgs:\n    tickers: Comma-separated ticker symbols to filter by (e.g. AAPL,MSFT).\n    tags: Comma-separated tags to filter by.\n    source: News source to filter by.\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    limit: Maximum number of articles to return (default 10).\n    offset: Number of articles to skip for pagination.\n    sort_by: Sort order \u2014 crawlDate or publishedDate.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sort_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tickers": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_news",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get definitions for all available fundamental metrics.\n\nReturns the list of metrics available in daily and statement endpoints,\nincluding their names, descriptions, and data types.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_fundamentals_definitions",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get quarterly and annual financial statements (income, balance sheet, cash flow).\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_financial_statements",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get daily fundamental metrics for a stock (market cap, P/E ratio, etc).\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_daily_fundamentals",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get company metadata including sector, industry, and location.\n\nArgs:\n    tickers: Comma-separated ticker symbols (e.g. AAPL,MSFT,GOOGL).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "tickers": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tickers"
+        ],
+        "type": "object"
+      },
+      "name": "get_company_meta",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical dividend and distribution data for a stock or ETF.\n\nArgs:\n    ticker: Stock/ETF ticker symbol (e.g. AAPL, SPY).\n    start_date: Filter dividends with ex-date on or after this date (YYYY-MM-DD).\n    end_date: Filter dividends with ex-date on or before this date (YYYY-MM-DD).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_dividends",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical dividend yield data for a stock or ETF.\n\nArgs:\n    ticker: Stock/ETF ticker symbol (e.g. AAPL, SPY).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_dividend_yield",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    {
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "description": "Get historical stock split data.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL, TSLA).\n    start_date: Filter splits with ex-date on or after this date (YYYY-MM-DD).\n    end_date: Filter splits with ex-date on or before this date (YYYY-MM-DD).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ticker": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "type": "object"
+      },
+      "name": "get_splits",
+      "outputSchema": {
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    }
+  ]
+}
