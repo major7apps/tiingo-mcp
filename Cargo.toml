@@ -1,0 +1,50 @@
+[package]
+name = "tiingo-mcp"
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "MCP server for the Tiingo financial data API"
+license = "MIT"
+repository = "https://github.com/major7apps/tiingo-mcp"
+keywords = ["mcp", "tiingo", "finance", "market-data"]
+categories = ["command-line-utilities", "api-bindings"]
+include = [
+  "/src/**/*.rs",
+  "/src/mcp/data/**/*.json",
+  "/Cargo.toml",
+  "/Cargo.lock",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+]
+
+[[bin]]
+name = "tiingo-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+bytes = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+futures-util = "0.3"
+httpdate = "1.0"
+rand = "0.9"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "query", "rustls", "stream"] }
+rmcp = { version = "=3.1.4", default-features = false, features = ["macros", "server", "transport-io"] }
+schemars = { version = "1.0", features = ["chrono04"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+rmcp = { version = "=3.1.4", default-features = false, features = ["client", "macros", "server", "transport-child-process", "transport-io"] }
+sysinfo = "0.37"
+wait-timeout = "0.2"
+wiremock = "0.6"
