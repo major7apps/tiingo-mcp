@@ -1,11 +1,12 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::{cmp::Ordering, time::Duration};
 
+use anyhow::Context;
 use rmcp::{
     ServiceExt,
     model::{CallToolRequestParams, GetPromptRequestParams, JsonObject, ReadResourceRequestParams},
     transport::TokioChildProcess,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tiingo_mcp::{
     client::TiingoClient,
     config::{Config, RetryPolicy},
@@ -18,6 +19,12 @@ use wiremock::{
 };
 
 const PYTHON_CONTRACT: &str = include_str!("contract/baseline/python-mcp.json");
+const CHILD_TIMEOUT: Duration = Duration::from_secs(5);
+const SOURCE_DATE: &str = "2026-08-24";
+const OFFICIAL_SOURCES: [&str; 2] = [
+    "https://www.tiingo.com/documentation/general/overview",
+    "https://api.tiingo.com/documentation/end-of-day",
+];
 
 fn child_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"));
@@ -25,299 +32,309 @@ fn child_command() -> Command {
     command
 }
 
-fn values<'a>(value: &'a Value, field: &str) -> &'a [Value] {
-    value[field].as_array().unwrap()
-}
-
-fn strings(items: &[Value], field: &str) -> BTreeSet<String> {
-    items
-        .iter()
-        .map(|item| item[field].as_str().unwrap().to_owned())
-        .collect()
-}
-
-fn named<'a>(items: &'a [Value], field: &str, name: &str) -> &'a Value {
-    items
-        .iter()
-        .find(|item| item[field] == name)
-        .unwrap_or_else(|| panic!("missing {field}={name}"))
-}
-
-fn schema_contract(schema: &Value) -> (BTreeSet<String>, BTreeSet<String>, Vec<(String, Value)>) {
-    let properties = schema["properties"].as_object().unwrap();
-    let property_names = properties.keys().cloned().collect();
-    let required = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|field| field.as_str().unwrap().to_owned())
-        .collect();
-    let defaults = properties
-        .iter()
-        .filter_map(|(name, property)| {
-            property
-                .get("default")
-                .map(|default| (name.clone(), default.clone()))
-        })
-        .collect();
-    (property_names, required, defaults)
-}
-
-fn prompt_arguments(prompt: &Value) -> BTreeSet<(String, bool)> {
-    prompt
-        .get("arguments")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|argument| {
-            (
-                argument["name"].as_str().unwrap().to_owned(),
-                argument
-                    .get("required")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            )
-        })
-        .collect()
-}
-
 fn arguments(value: Value) -> JsonObject {
     value.as_object().unwrap().clone()
 }
 
-fn baseline_resource_json(baseline: &Value, uri: &str) -> Value {
-    let text = baseline["resource_contents"][uri][0]["text"]
-        .as_str()
-        .unwrap();
-    serde_json::from_str(text).unwrap()
+fn sort_by_string_field(items: &mut [Value], field: &str) {
+    items.sort_by(|left, right| {
+        left[field]
+            .as_str()
+            .partial_cmp(&right[field].as_str())
+            .unwrap_or(Ordering::Equal)
+    });
 }
 
-fn result_text(value: &Value) -> &str {
-    value["messages"][0]["content"]["text"].as_str().unwrap()
+fn normalize_schema(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.into_iter().map(normalize_schema).collect()),
+        Value::Object(mut object) => {
+            object.remove("$schema");
+            for value in object.values_mut() {
+                *value = normalize_schema(value.take());
+            }
+            if let Some(branches) = object.get_mut("anyOf").and_then(Value::as_array_mut) {
+                branches.sort_by_key(Value::to_string);
+            }
+            if let Some(branches) = object.get("anyOf").and_then(Value::as_array)
+                && branches.iter().all(|branch| {
+                    branch
+                        .as_object()
+                        .is_some_and(|branch| branch.len() == 1 && branch["type"].is_string())
+                })
+            {
+                let mut types = branches
+                    .iter()
+                    .map(|branch| branch["type"].clone())
+                    .collect::<Vec<_>>();
+                types.sort_by_key(Value::to_string);
+                object.remove("anyOf");
+                object.insert("type".to_owned(), Value::Array(types));
+            }
+            for key in ["enum", "required", "type"] {
+                if let Some(values) = object.get_mut(key).and_then(Value::as_array_mut) {
+                    values.sort_by_key(Value::to_string);
+                }
+            }
+            Value::Object(object)
+        }
+        value => value,
+    }
 }
 
-#[tokio::test]
-async fn child_process_exposes_the_complete_contract() -> anyhow::Result<()> {
-    let transport = TokioChildProcess::new(child_command())?;
-    let client = ().serve(transport).await?;
+fn structured_output_schema() -> Value {
+    serde_json::json!({
+        "additionalProperties": false,
+        "properties": {
+            "data": {},
+            "meta": {
+                "additionalProperties": false,
+                "properties": {"source": {"type": "string"}},
+                "required": ["source"],
+                "type": "object"
+            }
+        },
+        "required": ["data", "meta"],
+        "type": "object"
+    })
+}
+
+fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
+    for tool in &mut tools {
+        tool.as_object_mut().unwrap().remove("_meta");
+        if expected {
+            if tool["name"] == "get_crypto_quote" {
+                let description = tool["description"].as_str().unwrap().replacen(
+                    "Get current top-of-book crypto prices.",
+                    "Get current crypto prices.",
+                    1,
+                );
+                tool["description"] = Value::String(description);
+            }
+            tool["outputSchema"] = structured_output_schema();
+        }
+        tool["inputSchema"] = normalize_schema(tool["inputSchema"].take());
+        tool["outputSchema"] = normalize_schema(tool["outputSchema"].take());
+    }
+    sort_by_string_field(&mut tools, "name");
+    tools
+}
+
+fn canonical_list(mut items: Vec<Value>, field: &str) -> Vec<Value> {
+    for item in &mut items {
+        item.as_object_mut().unwrap().remove("_meta");
+    }
+    sort_by_string_field(&mut items, field);
+    items
+}
+
+fn expected_resource_body(uri: &str, mut body: Value) -> Value {
+    let object = body.as_object_mut().unwrap();
+    match uri {
+        "tiingo://capabilities" => {
+            object.remove("server_version");
+            object.remove("rate_limits");
+            object.remove("plan_restrictions");
+            object.insert("as_of".to_owned(), Value::String(SOURCE_DATE.to_owned()));
+            object.insert(
+                "entitlements_change_over_time".to_owned(),
+                Value::Bool(true),
+            );
+            object.insert(
+                "official_sources".to_owned(),
+                serde_json::json!(OFFICIAL_SOURCES),
+            );
+        }
+        "tiingo://guide/corporate-actions"
+        | "tiingo://guide/crypto"
+        | "tiingo://guide/forex"
+        | "tiingo://guide/fundamentals"
+        | "tiingo://guide/news"
+        | "tiingo://guide/stocks" => {
+            object.remove("plan_restrictions");
+            object.insert(
+                "availability".to_owned(),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": OFFICIAL_SOURCES,
+                    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+                }),
+            );
+            if uri == "tiingo://guide/corporate-actions" {
+                object["common_pitfalls"].as_array_mut().unwrap().remove(0);
+            } else if uri == "tiingo://guide/crypto" {
+                object.insert(
+                    "current_price_route".to_owned(),
+                    Value::String("/tiingo/crypto/prices".to_owned()),
+                );
+            } else if uri == "tiingo://guide/stocks" {
+                let ticker_format = object["ticker_format"]
+                    .as_str()
+                    .unwrap()
+                    .replace("BRK.B", "BRK-A");
+                object.insert("ticker_format".to_owned(), Value::String(ticker_format));
+            }
+        }
+        _ => {}
+    }
+    body
+}
+
+fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
+    result.as_object_mut().unwrap().remove("resultType");
+    result.as_object_mut().unwrap().remove("_meta");
+    for content in result["contents"].as_array_mut().unwrap() {
+        content.as_object_mut().unwrap().remove("_meta");
+        let mut body: Value = serde_json::from_str(content["text"].as_str().unwrap()).unwrap();
+        if expected {
+            body = expected_resource_body(uri, body);
+        } else if uri == "tiingo://capabilities" {
+            body.as_object_mut().unwrap().remove("server_version");
+        }
+        content["text"] = body;
+    }
+    result
+}
+
+fn corrected_prompt_text(name: &str, text: &str) -> String {
+    match name {
+        "analyze-stock" => text
+            .replace(
+                "2. Call get_stock_prices",
+                "2. Call get_company_meta with tickers=AAPL to retrieve sector and industry.\n3. Call get_stock_prices",
+            )
+            .replace("\n3. Call get_daily_fundamentals", "\n4. Call get_daily_fundamentals")
+            .replace("\n4. Call get_news", "\n5. Call get_news"),
+        "earnings-report-analysis" => text.replace(
+            "- **Beat or Miss**: Did the company beat or miss expectations based on trends?",
+            "- **Expectations Context**: Do not label the result a beat or miss unless an article supplies an explicit consensus comparison.",
+        ),
+        "forex-pair-analysis" => text.replace(
+            "- **Notable Moves**: Any significant spikes or drops and their likely causes.",
+            "- **Notable Moves**: Identify significant spikes or drops, but state that price history alone cannot establish their cause.",
+        ),
+        _ => text.to_owned(),
+    }
+}
+
+fn canonical_prompt_result(name: &str, mut result: Value, expected: bool) -> Value {
+    result.as_object_mut().unwrap().remove("resultType");
+    result.as_object_mut().unwrap().remove("_meta");
+    if expected {
+        let text = result["messages"][0]["content"]["text"].as_str().unwrap();
+        result["messages"][0]["content"]["text"] = Value::String(corrected_prompt_text(name, text));
+    }
+    result
+}
+
+fn prompt_requests() -> [(String, Map<String, Value>); 5] {
+    [
+        (
+            "analyze-stock".to_owned(),
+            arguments(serde_json::json!({"ticker": "AAPL"})),
+        ),
+        (
+            "compare-stocks".to_owned(),
+            arguments(serde_json::json!({"ticker1": "AAPL", "ticker2": "MSFT"})),
+        ),
+        ("crypto-market-overview".to_owned(), JsonObject::new()),
+        (
+            "earnings-report-analysis".to_owned(),
+            arguments(serde_json::json!({
+                "ticker": "NVDA",
+                "earnings_date": "2024-02-21"
+            })),
+        ),
+        (
+            "forex-pair-analysis".to_owned(),
+            arguments(serde_json::json!({"pair": "eurusd"})),
+        ),
+    ]
+}
+
+async fn child_process_contract() -> anyhow::Result<()> {
+    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
+    let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
     assert_eq!(client.list_all_tools().await?.len(), 17);
     assert_eq!(client.list_all_resources().await?.len(), 3);
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);
 
-    client.cancel().await?;
-    Ok(())
-}
+    let mut expected_initialize = baseline["initialize"].clone();
+    expected_initialize["serverInfo"]["version"] = Value::String("<ignored>".to_owned());
+    expected_initialize["instructions"] =
+        Value::String("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.".to_owned());
+    let mut actual_initialize = serde_json::to_value(client.peer_info().unwrap())?;
+    actual_initialize["serverInfo"]["version"] = Value::String("<ignored>".to_owned());
+    assert_eq!(actual_initialize, expected_initialize, "initialize drifted");
 
-#[tokio::test]
-async fn canonical_discovery_matches_the_frozen_python_contract() -> anyhow::Result<()> {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
-    let transport = TokioChildProcess::new(child_command())?;
-    let client = ().serve(transport).await?;
-
-    let rust_tools = serde_json::to_value(client.list_all_tools().await?)?;
-    let rust_tools = rust_tools.as_array().unwrap();
-    let python_tools = values(&baseline, "tools");
-    assert_eq!(strings(rust_tools, "name"), strings(python_tools, "name"));
-    for python_tool in python_tools {
-        let name = python_tool["name"].as_str().unwrap();
-        let rust_tool = named(rust_tools, "name", name);
-        assert_eq!(
-            schema_contract(&rust_tool["inputSchema"]),
-            schema_contract(&python_tool["inputSchema"]),
-            "{name} argument contract drifted"
-        );
-        assert_eq!(rust_tool["inputSchema"]["type"], "object");
-        assert_eq!(rust_tool["inputSchema"]["additionalProperties"], false);
-    }
-
-    let rust_resources = serde_json::to_value(client.list_all_resources().await?)?;
-    let rust_resources = rust_resources.as_array().unwrap();
-    let python_resources = values(&baseline, "resources");
+    let actual_tools = serde_json::to_value(client.list_all_tools().await?)?
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(
-        strings(rust_resources, "uri"),
-        strings(python_resources, "uri")
+        canonical_tools(actual_tools, false),
+        canonical_tools(baseline["tools"].as_array().unwrap().clone(), true),
+        "tool discovery drifted"
     );
 
-    let rust_templates = serde_json::to_value(client.list_all_resource_templates().await?)?;
-    let rust_templates = rust_templates.as_array().unwrap();
-    let python_templates = values(&baseline, "resource_templates");
+    let actual_resources = serde_json::to_value(client.list_all_resources().await?)?
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(
-        strings(rust_templates, "uriTemplate"),
-        strings(python_templates, "uriTemplate")
+        canonical_list(actual_resources, "uri"),
+        canonical_list(baseline["resources"].as_array().unwrap().clone(), "uri"),
+        "resource discovery drifted"
     );
-
-    let rust_prompts = serde_json::to_value(client.list_all_prompts().await?)?;
-    let rust_prompts = rust_prompts.as_array().unwrap();
-    let python_prompts = values(&baseline, "prompts");
+    let actual_templates = serde_json::to_value(client.list_all_resource_templates().await?)?
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(
-        strings(rust_prompts, "name"),
-        strings(python_prompts, "name")
+        canonical_list(actual_templates, "uriTemplate"),
+        canonical_list(
+            baseline["resource_templates"].as_array().unwrap().clone(),
+            "uriTemplate"
+        ),
+        "resource-template discovery drifted"
     );
-    for python_prompt in python_prompts {
-        let name = python_prompt["name"].as_str().unwrap();
-        let rust_prompt = named(rust_prompts, "name", name);
-        assert_eq!(rust_prompt["description"], python_prompt["description"]);
-        assert_eq!(
-            prompt_arguments(rust_prompt),
-            prompt_arguments(python_prompt),
-            "{name} prompt arguments drifted"
-        );
-    }
-
-    client.cancel().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn approved_mcp_deltas_are_explicit() -> anyhow::Result<()> {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
-    let transport = TokioChildProcess::new(child_command())?;
-    let client = ().serve(transport).await?;
-
-    let python_instructions = baseline["initialize"]["instructions"].as_str().unwrap();
-    assert!(python_instructions.contains("Provides real-time and historical"));
+    let actual_prompts = serde_json::to_value(client.list_all_prompts().await?)?
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(
-        client.peer_info().unwrap().instructions.as_deref(),
-        Some("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.")
+        canonical_list(actual_prompts, "name"),
+        canonical_list(baseline["prompts"].as_array().unwrap().clone(), "name"),
+        "prompt discovery drifted"
     );
 
-    let rust_resources = client.list_all_resources().await?;
-    assert!(
-        rust_resources
-            .iter()
-            .all(|resource| resource.mime_type.as_deref() == Some("application/json"))
-    );
-    assert!(
-        values(&baseline, "resources")
-            .iter()
-            .all(|resource| resource["mimeType"] == "text/plain")
-    );
-
-    let python_capabilities = baseline_resource_json(&baseline, "tiingo://capabilities");
-    assert!(python_capabilities.get("rate_limits").is_some());
-    assert!(python_capabilities.get("plan_restrictions").is_some());
-    let rust_capabilities = serde_json::to_value(
-        client
-            .read_resource(ReadResourceRequestParams::new("tiingo://capabilities"))
-            .await?,
-    )?;
-    let rust_capabilities: Value =
-        serde_json::from_str(rust_capabilities["contents"][0]["text"].as_str().unwrap())?;
-    assert_eq!(rust_capabilities["as_of"], "2026-08-24");
-    assert_eq!(rust_capabilities["entitlements_change_over_time"], true);
-    assert!(
-        rust_capabilities["official_sources"]
-            .as_array()
-            .unwrap()
-            .len()
-            >= 2
-    );
-    assert!(rust_capabilities.get("rate_limits").is_none());
-    assert!(rust_capabilities.get("plan_restrictions").is_none());
-
-    for asset_class in [
-        "corporate-actions",
-        "crypto",
-        "forex",
-        "fundamentals",
-        "news",
-        "stocks",
-    ] {
-        let uri = format!("tiingo://guide/{asset_class}");
-        let guide = serde_json::to_value(
+    for (uri, expected) in baseline["resource_contents"].as_object().unwrap() {
+        let actual = serde_json::to_value(
             client
-                .read_resource(ReadResourceRequestParams::new(&uri))
+                .read_resource(ReadResourceRequestParams::new(uri))
                 .await?,
         )?;
-        let guide: Value = serde_json::from_str(guide["contents"][0]["text"].as_str().unwrap())?;
-        assert_eq!(guide["availability"]["as_of"], "2026-08-24");
-        assert!(
-            guide["availability"]["statement"]
-                .as_str()
-                .unwrap()
-                .contains("current Tiingo account entitlements")
+        assert_eq!(
+            canonical_resource_result(uri, actual, false),
+            canonical_resource_result(uri, serde_json::json!({"contents": expected.clone()}), true),
+            "{uri} content drifted"
         );
-        assert!(guide.get("plan_restrictions").is_none());
     }
 
-    let python_stocks = baseline_resource_json(&baseline, "tiingo://guide/stocks");
-    assert!(
-        python_stocks["ticker_format"]
-            .as_str()
-            .unwrap()
-            .contains("BRK.B")
-    );
-    let rust_stocks = serde_json::to_value(
-        client
-            .read_resource(ReadResourceRequestParams::new("tiingo://guide/stocks"))
-            .await?,
-    )?;
-    let rust_stocks: Value =
-        serde_json::from_str(rust_stocks["contents"][0]["text"].as_str().unwrap())?;
-    assert!(
-        rust_stocks["ticker_format"]
-            .as_str()
-            .unwrap()
-            .contains("BRK-A")
-    );
-    assert!(
-        !rust_stocks["ticker_format"]
-            .as_str()
-            .unwrap()
-            .contains("BRK.B")
-    );
-
-    let python_analyze = result_text(&baseline["prompt_results"]["analyze-stock"]);
-    assert!(!python_analyze.contains("get_company_meta"));
-    let analyze = serde_json::to_value(
-        client
-            .get_prompt(
-                GetPromptRequestParams::new("analyze-stock")
-                    .with_arguments(arguments(serde_json::json!({"ticker": "AAPL"}))),
-            )
-            .await?,
-    )?;
-    let analyze = result_text(&analyze);
-    assert!(
-        analyze.find("get_company_meta").unwrap() < analyze.find("sector and industry").unwrap()
-    );
-
-    let python_earnings = result_text(&baseline["prompt_results"]["earnings-report-analysis"]);
-    assert!(python_earnings.contains("Beat or Miss"));
-    assert!(python_earnings.contains("based on trends"));
-    let earnings = serde_json::to_value(
-        client
-            .get_prompt(
-                GetPromptRequestParams::new("earnings-report-analysis").with_arguments(arguments(
-                    serde_json::json!({
-                        "ticker": "NVDA",
-                        "earnings_date": "2024-02-21"
-                    }),
-                )),
-            )
-            .await?,
-    )?;
-    let earnings = result_text(&earnings).to_lowercase();
-    assert!(earnings.contains("expectations data is not available"));
-    assert!(earnings.contains("do not label the results a beat or miss"));
-    assert!(!earnings.contains("based on trends"));
-
-    let python_forex = result_text(&baseline["prompt_results"]["forex-pair-analysis"]);
-    assert!(python_forex.contains("likely causes"));
-    let forex = serde_json::to_value(
-        client
-            .get_prompt(
-                GetPromptRequestParams::new("forex-pair-analysis")
-                    .with_arguments(arguments(serde_json::json!({"pair": "eurusd"}))),
-            )
-            .await?,
-    )?;
-    let forex = result_text(&forex);
-    assert!(forex.contains("price data alone cannot establish their cause"));
-    assert!(!forex.contains("likely causes"));
+    for (name, request_arguments) in prompt_requests() {
+        let actual = serde_json::to_value(
+            client
+                .get_prompt(GetPromptRequestParams::new(&name).with_arguments(request_arguments))
+                .await?,
+        )?;
+        assert_eq!(
+            canonical_prompt_result(&name, actual, false),
+            canonical_prompt_result(&name, baseline["prompt_results"][&name].clone(), true),
+            "{name} result drifted"
+        );
+    }
 
     let missing_key = client
         .call_tool(
@@ -340,13 +357,40 @@ async fn approved_mcp_deltas_are_explicit() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn child_process_matches_the_frozen_contract_plus_exact_approved_deltas() -> anyhow::Result<()>
+{
+    tokio::time::timeout(CHILD_TIMEOUT, child_process_contract())
+        .await
+        .context("compiled child contract timed out")??;
+    Ok(())
+}
+
+#[test]
+fn frozen_python_rejected_current_discover_with_the_exact_legacy_error() -> anyhow::Result<()> {
+    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
+    assert_eq!(
+        baseline["server_discover"],
+        serde_json::json!({
+            "error": {
+                "code": -32602,
+                "data": "",
+                "message": "Invalid request parameters"
+            }
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn approved_crypto_route_and_bounded_retry_delta_are_explicit() -> anyhow::Result<()> {
     let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
-    let python_crypto_quote = values(&baseline, "http_requests")
-        .iter()
-        .find(|request| request["path"] == "/tiingo/crypto/top")
-        .expect("frozen Python crypto quote route");
-    assert_eq!(python_crypto_quote["method"], "GET");
+    assert!(
+        baseline["http_requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|request| request["path"] == "/tiingo/crypto/top")
+    );
 
     let upstream = MockServer::start().await;
     Mock::given(method("GET"))
@@ -375,6 +419,5 @@ async fn approved_crypto_route_and_bounded_retry_delta_are_explicit() -> anyhow:
         client.get_crypto_quote(Some("btcusd")).await?,
         serde_json::json!({"ok": true})
     );
-
     Ok(())
 }

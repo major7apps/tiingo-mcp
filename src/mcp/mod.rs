@@ -4,7 +4,7 @@ use crate::client::TiingoClient;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{ServerCapabilities, ServerInfo},
+    model::{ExtensionCapabilities, Implementation, JsonObject, ServerCapabilities, ServerInfo},
 };
 
 pub mod prompts;
@@ -32,15 +32,32 @@ impl TiingoServer {
 
 #[rmcp::tool_handler(router = self.tool_router)]
 impl ServerHandler for TiingoServer {
+    #[allow(deprecated)]
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .enable_prompts()
-                .build(),
-        )
-        .with_instructions("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.")
+        let mut extensions = ExtensionCapabilities::new();
+        extensions.insert("io.modelcontextprotocol/ui".to_owned(), JsonObject::new());
+        let mut capabilities = ServerCapabilities::builder()
+            .enable_experimental()
+            .enable_extensions_with(extensions)
+            .enable_logging()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .enable_resources()
+            .enable_resources_list_changed()
+            .enable_prompts()
+            .enable_prompts_list_changed()
+            .build();
+        capabilities
+            .resources
+            .as_mut()
+            .expect("resources enabled")
+            .subscribe = Some(false);
+        ServerInfo::new(capabilities)
+            .with_server_info(Implementation::new(
+                "Tiingo MCP Server",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.")
     }
 
     async fn list_resources(

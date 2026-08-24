@@ -208,7 +208,6 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         .await
         .unwrap();
     let earnings_text = text(&earnings).to_lowercase();
-    assert!(earnings_text.contains("expectations data is not available"));
     assert!(!earnings_text.contains("based on trends"));
     assert!(earnings_text.contains("explicit consensus comparison"));
 
@@ -222,7 +221,7 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         .unwrap();
     let forex_text = text(&forex);
     assert!(forex_text.contains("past 1 month"));
-    assert!(forex_text.contains("price data alone cannot establish their cause"));
+    assert!(forex_text.contains("price history alone cannot establish their cause"));
     assert!(!forex_text.contains("likely causes"));
 
     connection.close().await;

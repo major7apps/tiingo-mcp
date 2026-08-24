@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::Context;
 use assert_cmd::Command as AssertCommand;
 use predicates::prelude::*;
 use rmcp::{ClientHandler, ServiceExt};
@@ -42,11 +43,10 @@ fn wait_for_exit(child: &mut Child) -> std::io::Result<std::process::ExitStatus>
     ))
 }
 
-#[tokio::test]
-async fn stdio_supports_python_compatible_initialize_and_current_discover() -> anyhow::Result<()> {
-    let transport = rmcp::transport::TokioChildProcess::new(tokio::process::Command::new(env!(
-        "CARGO_BIN_EXE_tiingo-mcp"
-    )))?;
+async fn initialize_discover_and_cancel() -> anyhow::Result<()> {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"));
+    command.env_remove("TIINGO_API_KEY");
+    let transport = rmcp::transport::TokioChildProcess::new(command)?;
     let client = VersionedClient(rmcp::model::ProtocolVersion::V_2025_11_25)
         .serve(transport)
         .await?;
@@ -63,20 +63,28 @@ async fn stdio_supports_python_compatible_initialize_and_current_discover() -> a
     meta.set_client_info(rmcp::model::Implementation::new("contract-test", "2.0.0"));
     meta.set_client_capabilities(rmcp::model::ClientCapabilities::default());
     let discovery = client.discover(meta).await?;
-    assert!(
-        discovery
-            .supported_versions
-            .contains(&rmcp::model::ProtocolVersion::V_2025_11_25)
-    );
-    assert!(
-        discovery
-            .supported_versions
-            .contains(&rmcp::model::ProtocolVersion::V_2026_07_28)
+    assert_eq!(
+        discovery.supported_versions,
+        vec![
+            rmcp::model::ProtocolVersion::V_2024_11_05,
+            rmcp::model::ProtocolVersion::V_2025_03_26,
+            rmcp::model::ProtocolVersion::V_2025_06_18,
+            rmcp::model::ProtocolVersion::V_2025_11_25,
+            rmcp::model::ProtocolVersion::V_2026_07_28,
+        ]
     );
     assert!(discovery.capabilities.tools.is_some());
     assert!(discovery.capabilities.resources.is_some());
     assert!(discovery.capabilities.prompts.is_some());
     client.cancel().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn stdio_supports_python_compatible_initialize_and_current_discover() -> anyhow::Result<()> {
+    tokio::time::timeout(Duration::from_secs(5), initialize_discover_and_cancel())
+        .await
+        .context("stdio initialize/discover/cancel timed out")??;
     Ok(())
 }
 

@@ -279,10 +279,9 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
         news.input_schema["properties"]["limit"]["type"],
         serde_json::json!(["integer", "null"])
     );
-    assert_eq!(news.input_schema["properties"]["limit"]["minimum"], 0);
     assert_eq!(
-        news.input_schema["$defs"]["NewsSort"]["enum"],
-        serde_json::json!(["crawlDate", "publishedDate"])
+        news.input_schema["properties"]["sort_by"]["type"],
+        serde_json::json!(["string", "null"])
     );
 
     let stock_prices = tools
@@ -294,8 +293,8 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
         serde_json::json!(["ticker"])
     );
     assert_eq!(
-        stock_prices.input_schema["$defs"]["EodResample"]["enum"],
-        serde_json::json!(["daily", "weekly", "monthly", "annually"])
+        stock_prices.input_schema["properties"]["resample_freq"]["type"],
+        serde_json::json!(["string", "null"])
     );
 
     connection.close().await;

@@ -15,26 +15,37 @@ const GUIDE_STOCKS: &str = include_str!("data/guides/stocks.json");
 
 pub fn list() -> Vec<Resource> {
     vec![
-        Resource::new("tiingo://capabilities", "capabilities")
-            .with_description("Server capabilities and source-dated entitlement guidance")
-            .with_mime_type("application/json"),
+        Resource::new("tiingo://capabilities", "capabilities_resource")
+            .with_description(
+                "Server capabilities, supported asset classes, rate limits, and plan restrictions",
+            )
+            .with_mime_type("text/plain"),
         Resource::new(
             "tiingo://fundamentals/definitions",
-            "fundamentals-definitions",
+            "fundamentals_definitions_resource",
         )
-        .with_description("Curated common fundamental metric definitions")
-        .with_mime_type("application/json"),
-        Resource::new("tiingo://guide/date-formats", "date-formats")
-            .with_description("Date, resampling, sorting, and corporate-action parameter reference")
-            .with_mime_type("application/json"),
+        .with_description(
+            "Curated reference of common fundamental metrics with descriptions and statement types",
+        )
+        .with_mime_type("text/plain"),
+        Resource::new("tiingo://guide/date-formats", "date_formats_resource")
+            .with_description(
+                "Date format, resample frequencies, sort options, and parameter reference for all endpoints",
+            )
+            .with_mime_type("text/plain"),
     ]
 }
 
 pub fn templates() -> Vec<ResourceTemplate> {
     vec![
-        ResourceTemplate::new("tiingo://guide/{asset_class}", "asset-class-guide")
-            .with_description("Tools, workflows, symbology, and pitfalls for one asset class")
-            .with_mime_type("application/json"),
+        ResourceTemplate::new(
+            "tiingo://guide/{asset_class}",
+            "asset_class_guide_resource",
+        )
+        .with_description(
+            "Usage guide for a specific asset class: tools, workflows, ticker formats, and pitfalls",
+        )
+        .with_mime_type("text/plain"),
     ]
 }
 
@@ -57,7 +68,7 @@ pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
                 )
             });
             return Ok(ReadResourceResult::new(vec![
-                ResourceContents::text(error.to_string(), uri).with_mime_type("application/json"),
+                ResourceContents::text(error.to_string(), uri).with_mime_type("text/plain"),
             ]));
         }
         _ => {
@@ -68,6 +79,6 @@ pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
         }
     };
     Ok(ReadResourceResult::new(vec![
-        ResourceContents::text(json, uri).with_mime_type("application/json"),
+        ResourceContents::text(json, uri).with_mime_type("text/plain"),
     ]))
 }

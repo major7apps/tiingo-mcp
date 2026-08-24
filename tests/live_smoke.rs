@@ -16,18 +16,43 @@ enum LiveOutcome {
     Entitlement,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ResponseShape {
+    NonEmptyObject,
+    NonEmptyObjectArray,
+}
+
+impl ResponseShape {
+    fn matches(self, value: &Value) -> bool {
+        match self {
+            Self::NonEmptyObject => value.as_object().is_some_and(|object| !object.is_empty()),
+            Self::NonEmptyObjectArray => value.as_array().is_some_and(|rows| {
+                !rows.is_empty()
+                    && rows
+                        .iter()
+                        .all(|row| row.as_object().is_some_and(|object| !object.is_empty()))
+            }),
+        }
+    }
+}
+
 async fn classify(
     capability: &str,
+    expected_shape: ResponseShape,
     request: impl Future<Output = Result<Value, TiingoError>>,
-) -> anyhow::Result<(LiveOutcome, Option<Value>)> {
+) -> anyhow::Result<LiveOutcome> {
     match request.await {
         Ok(value) => {
+            anyhow::ensure!(
+                expected_shape.matches(&value),
+                "LIVE {capability}: success response was not a representative {expected_shape:?}"
+            );
             println!("LIVE {capability}: success");
-            Ok((LiveOutcome::Success, Some(value)))
+            Ok(LiveOutcome::Success)
         }
         Err(TiingoError::Entitlement { .. }) => {
             println!("LIVE {capability}: entitlement (HTTP 403)");
-            Ok((LiveOutcome::Entitlement, None))
+            Ok(LiveOutcome::Entitlement)
         }
         Err(error) => Err(anyhow::anyhow!("LIVE {capability}: {error}")),
     }
@@ -44,33 +69,40 @@ fn short_range() -> DateRange {
     }
 }
 
+fn corporate_action_range() -> DateRange {
+    DateRange {
+        start_date: Some(date(2023, 1, 1)),
+        end_date: Some(date(2024, 12, 31)),
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires TIINGO_API_KEY and consumes quota"]
 async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
-    if std::env::var("TIINGO_API_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .is_none()
-    {
-        println!("SKIP live smoke: TIINGO_API_KEY is not set");
-        return Ok(());
-    }
+    anyhow::ensure!(
+        std::env::var("TIINGO_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .is_some(),
+        "TIINGO_API_KEY must be set to a non-empty value when the ignored live smoke is selected"
+    );
 
     let client = TiingoClient::from_env()?;
 
-    let (metadata_outcome, metadata) =
-        classify("stock metadata", client.get_stock_metadata("AAPL")).await?;
+    let metadata_outcome = classify(
+        "stock metadata",
+        ResponseShape::NonEmptyObject,
+        client.get_stock_metadata("AAPL"),
+    )
+    .await?;
     anyhow::ensure!(
         metadata_outcome == LiveOutcome::Success,
         "stock metadata requires baseline access"
     );
-    anyhow::ensure!(
-        metadata.is_some_and(|value| value.as_object().is_some_and(|object| !object.is_empty())),
-        "stock metadata returned no usable object"
-    );
 
-    let (eod_outcome, eod) = classify(
+    let eod_outcome = classify(
         "short stock EOD range",
+        ResponseShape::NonEmptyObjectArray,
         client.get_stock_prices("AAPL", short_range(), None),
     )
     .await?;
@@ -78,19 +110,22 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
         eod_outcome == LiveOutcome::Success,
         "short stock EOD range requires baseline access"
     );
-    anyhow::ensure!(
-        eod.is_some_and(|value| value.as_array().is_some_and(|rows| !rows.is_empty())),
-        "short stock EOD range returned no rows"
-    );
 
-    classify("forex pair", client.get_forex_quote("eurusd")).await?;
+    classify(
+        "forex pair",
+        ResponseShape::NonEmptyObjectArray,
+        client.get_forex_quote("eurusd"),
+    )
+    .await?;
     classify(
         "filtered crypto prices",
+        ResponseShape::NonEmptyObjectArray,
         client.get_crypto_quote(Some("btcusd")),
     )
     .await?;
     classify(
         "filtered news",
+        ResponseShape::NonEmptyObjectArray,
         client.get_news(NewsQuery {
             tickers: Some("AAPL".to_owned()),
             limit: Some(1),
@@ -100,14 +135,28 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
     .await?;
     classify(
         "fundamentals definitions",
+        ResponseShape::NonEmptyObjectArray,
         client.get_fundamentals_definitions(),
     )
     .await?;
     classify(
         "corporate-action dividends",
-        client.get_dividends("AAPL", short_range()),
+        ResponseShape::NonEmptyObjectArray,
+        client.get_dividends("AAPL", corporate_action_range()),
     )
     .await?;
 
     Ok(())
+}
+
+#[tokio::test]
+async fn empty_success_is_not_live_capability_evidence() {
+    let error = classify(
+        "empty example",
+        ResponseShape::NonEmptyObjectArray,
+        std::future::ready(Ok(serde_json::json!([]))),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("not a representative"));
 }
