@@ -113,7 +113,7 @@ The fixed resource URIs remain:
 
 - `tiingo://capabilities`
 - `tiingo://fundamentals/definitions`
-- `tiingo://reference/date-formats`
+- `tiingo://guide/date-formats`
 
 The `tiingo://guide/{asset_class}` resource template and its six current asset-class values remain discoverable. The prompt names remain `analyze-stock`, `compare-stocks`, `crypto-market-overview`, `earnings-report-analysis`, and `forex-pair-analysis`, with compatible arguments and defaults.
 
@@ -201,7 +201,7 @@ All Tiingo operations in this delivery are GET requests. A call is attempted at 
 
 Error text includes the Tiingo capability and a useful next action but does not speculate about a user's subscription plan. Logs redact the authorization header and never serialize the API key. Unexpected responses record status and a bounded body excerpt on stderr; the MCP error receives a sanitized message.
 
-The client enforces one fixed maximum decoded response size in this release. Crossing it returns a classified error that asks the caller to narrow dates, tickers, or limits. The exact byte threshold is selected from captured current-response fixtures during implementation and committed as a tested constant, not exposed as premature configuration.
+The client enforces an 8 MiB maximum decoded response size in this release. Crossing it returns a classified error that asks the caller to narrow dates, tickers, or limits. The limit is a tested constant, not exposed as premature configuration; the performance report records the largest captured fixture and the resulting safety margin.
 
 ## Testing and evidence
 
@@ -209,7 +209,7 @@ The client enforces one fixed maximum decoded response size in this release. Cro
 
 Before Rust source is added, the Python server is used to capture canonical JSON fixtures for:
 
-- legacy `initialize`, current `server/discover`, protocol negotiation, `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list`;
+- legacy `initialize`, protocol negotiation, `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list`; the Python baseline also records its `-32602` rejection of current `server/discover`, while Rust must support that current discovery method;
 - every tool's input schema and representative successful request mapping;
 - every fixed resource, every guide template value, and every prompt/default combination;
 - representative 401, 403, 404, 429, timeout, malformed JSON, and 5xx behavior.
