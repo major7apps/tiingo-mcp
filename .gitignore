@@ -21,6 +21,9 @@ ENV/
 *.swo
 *~
 
+# Worktrees
+.worktrees/
+
 # Testing
 .pytest_cache/
 .coverage
