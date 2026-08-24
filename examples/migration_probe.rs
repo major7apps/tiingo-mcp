@@ -1,6 +1,8 @@
 use std::{
+    collections::HashSet,
     io::{BufRead, BufReader, Write},
     process::{Child, Command, Stdio},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -19,7 +21,6 @@ use tiingo_mcp::{
     mcp::TiingoServer,
 };
 use url::Url;
-use wait_timeout::ChildExt;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -100,26 +101,122 @@ fn request(
     Ok(())
 }
 
-fn rss_bytes(system: &mut System, child: &Child) -> anyhow::Result<u64> {
-    let pid = Pid::from(child.id() as usize);
-    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-    system
-        .process(pid)
-        .map(|process| process.memory())
-        .context("measured server process exited before RSS collection")
+fn extend_process_tree(system: &System, process_tree: &mut HashSet<Pid>) {
+    loop {
+        let descendants = system
+            .processes()
+            .iter()
+            .filter_map(|(pid, process)| {
+                process
+                    .parent()
+                    .filter(|parent| process_tree.contains(parent))
+                    .map(|_| *pid)
+            })
+            .filter(|pid| !process_tree.contains(pid))
+            .collect::<Vec<_>>();
+        if descendants.is_empty() {
+            return;
+        }
+        process_tree.extend(descendants);
+    }
 }
 
-fn wait_for_exit(child: &mut Child) -> anyhow::Result<()> {
-    if let Some(status) = child.wait_timeout(EXIT_TIMEOUT)? {
-        ensure!(status.success(), "server exited with {status}");
-        return Ok(());
+fn refresh_process_tree(system: &mut System, root: Pid, process_tree: &mut HashSet<Pid>) {
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    process_tree.insert(root);
+    extend_process_tree(system, process_tree);
+}
+
+fn process_tree_rss_bytes(system: &mut System, child: &Child) -> anyhow::Result<u64> {
+    let root = Pid::from(child.id() as usize);
+    let mut process_tree = HashSet::from([root]);
+    refresh_process_tree(system, root, &mut process_tree);
+    ensure!(
+        system.process(root).is_some(),
+        "measured server process exited before RSS collection"
+    );
+    Ok(process_tree
+        .iter()
+        .filter_map(|pid| system.process(*pid))
+        .map(|process| process.memory())
+        .sum())
+}
+
+fn terminate_process_tree(
+    child: &mut Child,
+    system: &mut System,
+    process_tree: &mut HashSet<Pid>,
+) -> anyhow::Result<()> {
+    let root = Pid::from(child.id() as usize);
+    refresh_process_tree(system, root, process_tree);
+    for pid in process_tree.iter().filter(|pid| **pid != root) {
+        if let Some(process) = system.process(*pid) {
+            process.kill();
+        }
     }
-    child.kill()?;
+    if child.try_wait()?.is_none() {
+        child.kill()?;
+    }
     child.wait()?;
-    anyhow::bail!("server did not exit within five seconds after stdin closed")
+
+    let confirmation_deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        system.refresh_processes(ProcessesToUpdate::All, true);
+        if process_tree
+            .iter()
+            .all(|pid| system.process(*pid).is_none())
+        {
+            return Ok(());
+        }
+        ensure!(
+            Instant::now() < confirmation_deadline,
+            "failed to terminate complete launched process tree"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn cleanup_process_tree(child: &mut Child, timeout: Duration) -> anyhow::Result<()> {
+    let root = Pid::from(child.id() as usize);
+    let deadline = Instant::now() + timeout;
+    let mut system = System::new();
+    let mut process_tree = HashSet::from([root]);
+    let mut root_status = None;
+
+    loop {
+        refresh_process_tree(&mut system, root, &mut process_tree);
+        if root_status.is_none() {
+            root_status = child.try_wait()?;
+        }
+        let tree_is_gone = process_tree
+            .iter()
+            .all(|pid| system.process(*pid).is_none());
+        if tree_is_gone {
+            let status = root_status.context("server process disappeared before it was reaped")?;
+            ensure!(status.success(), "server exited with {status}");
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    terminate_process_tree(child, &mut system, &mut process_tree)?;
+    anyhow::bail!(
+        "server process tree did not exit within {:.3} seconds after stdin closed; terminated",
+        timeout.as_secs_f64()
+    )
 }
 
 fn process_sample(command: &[String]) -> anyhow::Result<ProcessSample> {
+    process_sample_with_timeout(command, EXIT_TIMEOUT)
+}
+
+fn process_sample_with_timeout(
+    command: &[String],
+    exit_timeout: Duration,
+) -> anyhow::Result<ProcessSample> {
     let started = Instant::now();
     let mut child = Command::new(&command[0])
         .args(&command[1..])
@@ -128,79 +225,102 @@ fn process_sample(command: &[String]) -> anyhow::Result<ProcessSample> {
         .stderr(Stdio::null())
         .spawn()
         .with_context(|| format!("failed to spawn {}", command[0]))?;
-    let mut stdin = child.stdin.take().context("child stdin was not piped")?;
-    let stdout = child.stdout.take().context("child stdout was not piped")?;
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let (mut stdin, stdout) = match (stdin, stdout) {
+        (Some(stdin), Some(stdout)) => (stdin, stdout),
+        _ => {
+            let handle_error = anyhow::anyhow!("child stdio was not piped");
+            if let Err(cleanup_error) = cleanup_process_tree(&mut child, exit_timeout) {
+                eprintln!("cleanup after stdio error: {cleanup_error:#}");
+            }
+            return Err(handle_error);
+        }
+    };
     let mut stdout = BufReader::new(stdout);
 
-    write_message(
-        &mut stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "migration-probe", "version": "1.0.0"}
-            }
-        }),
-    )?;
-    read_successful_response(&mut stdout, 1)?;
-    let startup_ms = started.elapsed().as_secs_f64() * 1_000.0;
-
-    let mut system = System::new();
-    let rss_initialized_bytes = rss_bytes(&mut system, &child)?;
-    write_message(
-        &mut stdin,
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {}
-        }),
-    )?;
-
-    request(&mut stdin, &mut stdout, 2, "tools/list", json!({}))?;
-    request(&mut stdin, &mut stdout, 3, "resources/list", json!({}))?;
-
-    let mut id = 4;
-    for uri in FIXED_RESOURCES {
-        request(
+    let probe_result = (|| {
+        write_message(
             &mut stdin,
-            &mut stdout,
-            id,
-            "resources/read",
-            json!({"uri": uri}),
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "migration-probe", "version": "1.0.0"}
+                }
+            }),
         )?;
-        id += 1;
-    }
+        read_successful_response(&mut stdout, 1)?;
+        let startup_ms = started.elapsed().as_secs_f64() * 1_000.0;
 
-    let prompt_cases = [
-        json!({"name": "analyze-stock", "arguments": {"ticker": "AAPL"}}),
-        json!({
-            "name": "compare-stocks",
-            "arguments": {"ticker1": "AAPL", "ticker2": "MSFT"}
-        }),
-        json!({"name": "crypto-market-overview", "arguments": {}}),
-        json!({
-            "name": "earnings-report-analysis",
-            "arguments": {"ticker": "NVDA", "earnings_date": "2024-02-21"}
-        }),
-        json!({"name": "forex-pair-analysis", "arguments": {"pair": "eurusd"}}),
-    ];
-    for params in prompt_cases {
-        request(&mut stdin, &mut stdout, id, "prompts/get", params)?;
-        id += 1;
-    }
+        let mut system = System::new();
+        let rss_initialized_bytes = process_tree_rss_bytes(&mut system, &child)?;
+        write_message(
+            &mut stdin,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            }),
+        )?;
 
-    let rss_workload_bytes = rss_bytes(&mut system, &child)?;
+        request(&mut stdin, &mut stdout, 2, "tools/list", json!({}))?;
+        request(&mut stdin, &mut stdout, 3, "resources/list", json!({}))?;
+
+        let mut id = 4;
+        for uri in FIXED_RESOURCES {
+            request(
+                &mut stdin,
+                &mut stdout,
+                id,
+                "resources/read",
+                json!({"uri": uri}),
+            )?;
+            id += 1;
+        }
+
+        let prompt_cases = [
+            json!({"name": "analyze-stock", "arguments": {"ticker": "AAPL"}}),
+            json!({
+                "name": "compare-stocks",
+                "arguments": {"ticker1": "AAPL", "ticker2": "MSFT"}
+            }),
+            json!({"name": "crypto-market-overview", "arguments": {}}),
+            json!({
+                "name": "earnings-report-analysis",
+                "arguments": {"ticker": "NVDA", "earnings_date": "2024-02-21"}
+            }),
+            json!({"name": "forex-pair-analysis", "arguments": {"pair": "eurusd"}}),
+        ];
+        for params in prompt_cases {
+            request(&mut stdin, &mut stdout, id, "prompts/get", params)?;
+            id += 1;
+        }
+
+        let rss_workload_bytes = process_tree_rss_bytes(&mut system, &child)?;
+        Ok(ProcessSample {
+            startup_ms,
+            rss_initialized_bytes,
+            rss_workload_bytes,
+        })
+    })();
     drop(stdin);
-    wait_for_exit(&mut child)?;
-
-    Ok(ProcessSample {
-        startup_ms,
-        rss_initialized_bytes,
-        rss_workload_bytes,
-    })
+    let cleanup_result = cleanup_process_tree(&mut child, exit_timeout);
+    match probe_result {
+        Err(probe_error) => {
+            if let Err(cleanup_error) = cleanup_result {
+                eprintln!("cleanup after probe error: {cleanup_error:#}");
+            }
+            Err(probe_error)
+        }
+        Ok(sample) => {
+            cleanup_result?;
+            Ok(sample)
+        }
+    }
 }
 
 fn process_probe(runs: usize, command: &[String]) -> anyhow::Result<()> {
@@ -358,5 +478,132 @@ async fn main() -> anyhow::Result<()> {
         }
         (None, None) => anyhow::bail!("provide --runs N -- <command> or --wrapper-runs 1000"),
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn early_error_command() -> Vec<String> {
+        vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"early protocol error\"}}'; while :; do sleep 1; done"
+                .to_owned(),
+        ]
+    }
+
+    #[cfg(windows)]
+    fn early_error_command() -> Vec<String> {
+        vec![
+            "cmd".to_owned(),
+            "/D".to_owned(),
+            "/S".to_owned(),
+            "/C".to_owned(),
+            "echo {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"early protocol error\"}} & ping -t 127.0.0.1 >nul"
+                .to_owned(),
+        ]
+    }
+
+    #[cfg(unix)]
+    fn ignores_eof_command() -> Vec<String> {
+        vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            "i=1; while [ $i -le 11 ]; do printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\\n' \"$i\"; i=$((i + 1)); done; while :; do sleep 1; done"
+                .to_owned(),
+        ]
+    }
+
+    #[cfg(unix)]
+    fn descendant_command() -> Command {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 10 & wait")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    #[cfg(windows)]
+    fn descendant_command() -> Command {
+        let mut command = Command::new("cmd");
+        command
+            .args(["/D", "/S", "/C", "ping -n 10 127.0.0.1 >nul"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    #[cfg(windows)]
+    fn ignores_eof_command() -> Vec<String> {
+        let responses = (1..=11)
+            .map(|id| format!("echo {{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{{}}}}"))
+            .collect::<Vec<_>>()
+            .join(" & ");
+        vec![
+            "cmd".to_owned(),
+            "/D".to_owned(),
+            "/S".to_owned(),
+            "/C".to_owned(),
+            format!("{responses} & ping -t 127.0.0.1 >nul"),
+        ]
+    }
+
+    #[test]
+    fn early_protocol_error_is_preserved_after_bounded_cleanup() {
+        let started = Instant::now();
+        let error = process_sample_with_timeout(&early_error_command(), Duration::from_millis(200))
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("request 1 failed"),
+            "original protocol error was replaced: {error:#}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn child_that_ignores_eof_is_terminated_within_the_bound() {
+        let started = Instant::now();
+        let error = process_sample_with_timeout(&ignores_eof_command(), Duration::from_millis(200))
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("did not exit within"),
+            "unexpected cleanup error: {error:#}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn rss_includes_resident_descendants_in_the_launched_process_tree() {
+        let mut child = descendant_command().spawn().unwrap();
+        let root = Pid::from(child.id() as usize);
+        let mut system = System::new();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let root_rss = loop {
+            let mut process_tree = HashSet::from([root]);
+            refresh_process_tree(&mut system, root, &mut process_tree);
+            if process_tree.len() > 1 {
+                break system.process(root).unwrap().memory();
+            }
+            assert!(Instant::now() < deadline, "descendant did not start");
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        let aggregate_rss = process_tree_rss_bytes(&mut system, &child).unwrap();
+        drop(child.stdin.take());
+        let _ = cleanup_process_tree(&mut child, Duration::from_millis(200));
+
+        assert!(
+            aggregate_rss > root_rss,
+            "aggregate RSS {aggregate_rss} did not exceed root-only RSS {root_rss}"
+        );
     }
 }

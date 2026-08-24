@@ -34,28 +34,27 @@ The process probe starts a fresh child for every run and measures from immediate
 9. `prompts/get` for `earnings-report-analysis` with `ticker=NVDA` and `earnings_date=2024-02-21`
 10. `prompts/get` for `forex-pair-analysis` with `pair=eurusd` and the default period
 
-RSS is read from the direct child PID with sysinfo after initialization and after the full workload. Closing stdin must terminate each child within five seconds. Each runtime was measured for exactly 30 runs. After sorting, the deterministic zero-based indices are 14 for the median (`(30 - 1) / 2`) and 28 for p95 (`ceil(0.95 * 30) - 1`).
+RSS is the sum of the complete launched process tree: the direct command PID plus every recursively discovered descendant. This deliberately includes both the resident `uv` launcher and its Python server descendant for the Python command; the Rust command has only its server process. The same tree definition is applied with sysinfo after initialization and after the full workload. On every success or error path, the probe closes stdin, preserves any original probe error, waits at most five seconds, and force-terminates the tracked descendants and direct child before reaping the child if the tree does not exit. Each runtime was measured for exactly 30 runs. After sorting, the deterministic zero-based indices are 14 for the median (`(30 - 1) / 2`) and 28 for p95 (`ceil(0.95 * 30) - 1`).
 
 The wrapper probes each perform 10 warmup calls followed by exactly 1,000 measured `get_stock_metadata(AAPL)` calls. Setup, warmup, and teardown are outside the samples. The deterministic zero-based indices are 499 for the median and 949 for p95. Python uses the prescribed `httpx.MockTransport` with a `fixture.invalid` hostname assertion. Rust constructs `TiingoClient` directly with an internal Wiremock loopback URL, does not read `TIINGO_API_KEY`, and verifies that Wiremock captured exactly 1,010 requests. No wrapper probe can reach Tiingo.
 
-The managed execution sandbox denied access to uv's existing cache and denied Wiremock loopback binding. The affected local-only commands were therefore rerun through the approved unsandboxed execution path on the same machine. Rust stdio process measurements did not require that exception. This is an execution-environment distinction, not a product failure.
+The managed execution sandbox denied access to uv's existing cache and denied Wiremock loopback binding. The affected local-only commands were therefore run through the approved unsandboxed execution path on the same machine. The corrected Python and Rust 30-run process measurements were both run through that same unsandboxed path so their environment was identical. This is an execution-environment distinction, not a product failure.
 
 ## Raw outputs
 
 ```text
 $ cargo build --release
-    Finished `release` profile [optimized] target(s) in 0.54s
+    Finished `release` profile [optimized] target(s) in 0.14s
 
 $ cargo run --release --example migration_probe -- --runs 30 -- uv run tiingo-mcp
-   Compiling tiingo-mcp v2.0.0 (/Users/wshobson/workspace/tiingo-mcp/.worktrees/rust-rmcp-cutover)
-    Finished `release` profile [optimized] target(s) in 11.10s
+    Finished `release` profile [optimized] target(s) in 0.11s
      Running `target/release/examples/migration_probe --runs 30 -- uv run tiingo-mcp`
-{"rss_initialized_bytes_median":31965184,"rss_workload_bytes_median":31965184,"runs":30,"startup_ms_median":454.77804199999997,"startup_ms_p95":517.1877499999999}
+{"rss_initialized_bytes_median":113721344,"rss_workload_bytes_median":114032640,"runs":30,"startup_ms_median":478.661958,"startup_ms_p95":598.049666}
 
 $ cargo run --release --example migration_probe -- --runs 30 -- target/release/tiingo-mcp
-    Finished `release` profile [optimized] target(s) in 0.13s
+    Finished `release` profile [optimized] target(s) in 0.11s
      Running `target/release/examples/migration_probe --runs 30 -- target/release/tiingo-mcp`
-{"rss_initialized_bytes_median":10338304,"rss_workload_bytes_median":10813440,"runs":30,"startup_ms_median":3.923167,"startup_ms_p95":4.386875}
+{"rss_initialized_bytes_median":10305536,"rss_workload_bytes_median":10797056,"runs":30,"startup_ms_median":4.8952919999999995,"startup_ms_p95":5.304125}
 
 $ uv run python scripts/benchmark_python_wrapper.py
 {"runs": 1000, "wrapper_us_median": 848.209, "wrapper_us_p95": 1008.917}
@@ -72,10 +71,10 @@ Percentages are reductions from Python: `(Python - Rust) / Python * 100`.
 
 | Predicate | Python | Rust | Difference | Result |
 |---|---:|---:|---:|---|
-| Median cold start | 454.778042 ms | 3.923167 ms | 99.137345% lower | PASS |
-| p95 cold start | 517.187750 ms | 4.386875 ms | 99.151783% lower | informational |
-| Median initialized RSS | 31,965,184 bytes | 10,338,304 bytes | 67.657611% lower | PASS |
-| Median post-workload RSS | 31,965,184 bytes | 10,813,440 bytes | 66.171194% lower | PASS |
+| Median cold start | 478.661958 ms | 4.895292 ms | 98.977297% lower | PASS |
+| p95 cold start | 598.049666 ms | 5.304125 ms | 99.113096% lower | informational |
+| Median initialized RSS | 113,721,344 bytes | 10,305,536 bytes | 90.937905% lower | PASS |
+| Median post-workload RSS | 114,032,640 bytes | 10,797,056 bytes | 90.531609% lower | PASS |
 | Median local wrapper | 848.209 us | 79.667 us | 90.607621% lower | informational |
 | p95 local wrapper | 1,008.917 us | 157.917 us | 84.347870% lower | PASS |
 
