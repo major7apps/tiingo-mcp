@@ -1,0 +1,32 @@
+{
+  "manifest_version": "0.3",
+  "name": "tiingo-mcp",
+  "display_name": "Tiingo MCP",
+  "version": "2.0.0",
+  "description": "Stocks, forex, crypto, news, fundamentals, and corporate actions from Tiingo.",
+  "author": { "name": "Major7" },
+  "repository": { "type": "git", "url": "https://github.com/major7apps/tiingo-mcp" },
+  "license": "MIT",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/tiingo-mcp",
+    "mcp_config": {
+      "command": "server/tiingo-mcp",
+      "args": [],
+      "env": { "TIINGO_API_KEY": "${user_config.tiingo_api_key}" },
+      "platform_overrides": {
+        "win32": { "command": "server/tiingo-mcp.exe" }
+      }
+    }
+  },
+  "user_config": {
+    "tiingo_api_key": {
+      "type": "string",
+      "title": "Tiingo API key",
+      "description": "API key issued by Tiingo",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "compatibility": { "platforms": ["darwin", "linux", "win32"] }
+}
