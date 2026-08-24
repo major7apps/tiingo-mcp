@@ -14,6 +14,11 @@ use crate::{
     error::{TiingoError, sanitize_detail},
 };
 
+pub mod eod;
+pub mod forex;
+pub mod iex;
+pub mod query;
+
 #[derive(Clone, Debug)]
 pub struct TiingoClient {
     http: Client,
