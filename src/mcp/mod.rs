@@ -7,6 +7,7 @@ use rmcp::{
     model::{ServerCapabilities, ServerInfo},
 };
 
+pub mod prompts;
 pub mod resources;
 pub mod tools;
 
@@ -36,6 +37,7 @@ impl ServerHandler for TiingoServer {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_prompts()
                 .build(),
         )
         .with_instructions("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.")
@@ -67,5 +69,23 @@ impl ServerHandler for TiingoServer {
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ReadResourceResponse, rmcp::ErrorData> {
         Ok(resources::read(&request.uri)?.into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListPromptsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListPromptsResult::with_all_items(
+            prompts::list(),
+        ))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: rmcp::model::GetPromptRequestParams,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::GetPromptResponse, rmcp::ErrorData> {
+        Ok(prompts::get(request)?.into())
     }
 }
