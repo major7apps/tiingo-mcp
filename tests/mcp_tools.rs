@@ -77,6 +77,136 @@ fn arguments(value: serde_json::Value) -> JsonObject {
     value.as_object().unwrap().clone()
 }
 
+struct ExpectedToolSchema {
+    name: &'static str,
+    properties: &'static [&'static str],
+    required: &'static [&'static str],
+    optional: &'static [&'static str],
+}
+
+const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
+    ExpectedToolSchema {
+        name: "get_stock_metadata",
+        properties: &["ticker"],
+        required: &["ticker"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_stock_prices",
+        properties: &["ticker", "start_date", "end_date", "resample_freq"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date", "resample_freq"],
+    },
+    ExpectedToolSchema {
+        name: "get_realtime_price",
+        properties: &["ticker", "after_hours"],
+        required: &["ticker"],
+        optional: &["after_hours"],
+    },
+    ExpectedToolSchema {
+        name: "get_intraday_prices",
+        properties: &["ticker", "start_date", "end_date", "resample_freq"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date", "resample_freq"],
+    },
+    ExpectedToolSchema {
+        name: "get_forex_quote",
+        properties: &["ticker"],
+        required: &["ticker"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_forex_prices",
+        properties: &["ticker", "start_date", "end_date", "resample_freq"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date", "resample_freq"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_quote",
+        properties: &["tickers"],
+        required: &[],
+        optional: &["tickers"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_prices",
+        properties: &["tickers", "start_date", "end_date", "resample_freq"],
+        required: &["tickers"],
+        optional: &["start_date", "end_date", "resample_freq"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_metadata",
+        properties: &["tickers"],
+        required: &[],
+        optional: &["tickers"],
+    },
+    ExpectedToolSchema {
+        name: "get_news",
+        properties: &[
+            "tickers",
+            "tags",
+            "source",
+            "start_date",
+            "end_date",
+            "limit",
+            "offset",
+            "sort_by",
+        ],
+        required: &[],
+        optional: &[
+            "tickers",
+            "tags",
+            "source",
+            "start_date",
+            "end_date",
+            "limit",
+            "offset",
+            "sort_by",
+        ],
+    },
+    ExpectedToolSchema {
+        name: "get_fundamentals_definitions",
+        properties: &[],
+        required: &[],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_financial_statements",
+        properties: &["ticker", "start_date", "end_date"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_daily_fundamentals",
+        properties: &["ticker", "start_date", "end_date"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_company_meta",
+        properties: &["tickers"],
+        required: &["tickers"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_dividends",
+        properties: &["ticker", "start_date", "end_date"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_dividend_yield",
+        properties: &["ticker", "start_date", "end_date"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_splits",
+        properties: &["ticker", "start_date", "end_date"],
+        required: &["ticker"],
+        optional: &["start_date", "end_date"],
+    },
+];
+
 #[tokio::test]
 async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
     let upstream = MockServer::start().await;
@@ -92,27 +222,59 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
     assert_eq!(tools.len(), TOOL_NAMES.len());
     assert_eq!(actual_names, expected_names);
 
+    for expected in EXPECTED_TOOL_SCHEMAS {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == expected.name)
+            .unwrap();
+        let properties = tool.input_schema["properties"].as_object().unwrap();
+        assert_eq!(
+            properties
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            expected.properties.iter().copied().collect(),
+            "{} property names drifted",
+            expected.name
+        );
+        assert_eq!(
+            tool.input_schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|field| field.as_str().unwrap())
+                .collect::<BTreeSet<_>>(),
+            expected.required.iter().copied().collect(),
+            "{} required fields drifted",
+            expected.name
+        );
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::json!(false),
+            "{} must reject unknown arguments",
+            expected.name
+        );
+        for field in expected.optional {
+            assert_eq!(
+                properties[*field].get("default"),
+                Some(&serde_json::Value::Null),
+                "{}.{} must advertise its null default",
+                expected.name,
+                field
+            );
+        }
+        for field in expected.required {
+            assert!(
+                properties[*field].get("default").is_none(),
+                "{}.{} must remain required without a default",
+                expected.name,
+                field
+            );
+        }
+    }
+
     let news = tools.iter().find(|tool| tool.name == "get_news").unwrap();
-    assert_eq!(
-        news.input_schema["properties"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>(),
-        [
-            "tickers",
-            "tags",
-            "source",
-            "start_date",
-            "end_date",
-            "limit",
-            "offset",
-            "sort_by",
-        ]
-        .into_iter()
-        .collect()
-    );
     assert_eq!(
         news.input_schema["properties"]["limit"]["type"],
         serde_json::json!(["integer", "null"])
@@ -136,6 +298,46 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
         serde_json::json!(["daily", "weekly", "monthly", "annually"])
     );
 
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn rejects_unknown_arguments_before_contacting_tiingo() {
+    let upstream = MockServer::start().await;
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+
+    for (name, call_arguments) in [
+        (
+            "get_stock_metadata",
+            serde_json::json!({"ticker": "AAPL", "unexpected": true}),
+        ),
+        (
+            "get_fundamentals_definitions",
+            serde_json::json!({"unexpected": true}),
+        ),
+    ] {
+        let result = connection
+            .client
+            .call_tool(CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "{name} accepted an unknown field"
+        );
+        assert!(
+            result.content[0]
+                .as_text()
+                .unwrap()
+                .text
+                .contains("unknown field"),
+            "{name} did not report the invalid argument"
+        );
+    }
+
+    assert!(upstream.received_requests().await.unwrap().is_empty());
     connection.close().await;
 }
 

@@ -10,158 +10,212 @@ use rmcp::{
 use super::TiingoServer;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StockMetadataArgs {
     /// Stock ticker symbol (e.g. AAPL, MSFT, GOOGL).
     pub ticker: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StockPricesArgs {
     /// Stock ticker symbol (e.g. AAPL).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
     /// Resample frequency — daily, weekly, monthly, or annually.
+    #[serde(default)]
     pub resample_freq: Option<EodResample>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RealtimePriceArgs {
     /// Stock ticker symbol (e.g. AAPL).
     pub ticker: String,
     /// Include after-hours pricing data.
+    #[serde(default)]
     pub after_hours: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IntradayPricesArgs {
     /// Stock ticker symbol (e.g. AAPL).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
     /// Resample frequency — 1min, 5min, 15min, 30min, 1hour, etc.
+    #[serde(default)]
     pub resample_freq: Option<IntradayResample>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForexQuoteArgs {
     /// Currency pair (e.g. eurusd, gbpusd, usdjpy).
     pub ticker: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForexPricesArgs {
     /// Currency pair (e.g. eurusd, gbpusd, usdjpy).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
     /// Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day.
+    #[serde(default)]
     pub resample_freq: Option<IntradayResample>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CryptoQuoteArgs {
     /// Comma-separated crypto tickers (e.g. btcusd, ethusd). Omit for all.
+    #[serde(default)]
     pub tickers: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CryptoPricesArgs {
     /// Comma-separated crypto tickers (e.g. btcusd, ethusd).
     pub tickers: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
     /// Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day.
+    #[serde(default)]
     pub resample_freq: Option<IntradayResample>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CryptoMetadataArgs {
     /// Comma-separated crypto tickers to filter by. Omit for all.
+    #[serde(default)]
     pub tickers: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NewsArgs {
     /// Comma-separated ticker symbols to filter by (e.g. AAPL,MSFT).
+    #[serde(default)]
     pub tickers: Option<String>,
     /// Comma-separated tags to filter by.
+    #[serde(default)]
     pub tags: Option<String>,
     /// News source to filter by.
+    #[serde(default)]
     pub source: Option<String>,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
     /// Maximum number of articles to return (default 10).
+    #[serde(default)]
     pub limit: Option<u32>,
     /// Number of articles to skip for pagination.
+    #[serde(default)]
     pub offset: Option<u32>,
     /// Sort order — crawlDate or publishedDate.
+    #[serde(default)]
     pub sort_by: Option<NewsSort>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(extend("properties" = {}))]
+pub struct FundamentalsDefinitionsArgs {}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FinancialStatementsArgs {
     /// Stock ticker symbol (e.g. AAPL).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DailyFundamentalsArgs {
     /// Stock ticker symbol (e.g. AAPL).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CompanyMetaArgs {
     /// Comma-separated ticker symbols (e.g. AAPL,MSFT,GOOGL).
     pub tickers: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DividendsArgs {
     /// Stock/ETF ticker symbol (e.g. AAPL, SPY).
     pub ticker: String,
     /// Filter dividends with ex-date on or after this date (YYYY-MM-DD).
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// Filter dividends with ex-date on or before this date (YYYY-MM-DD).
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DividendYieldArgs {
     /// Stock/ETF ticker symbol (e.g. AAPL, SPY).
     pub ticker: String,
     /// Start date in YYYY-MM-DD format.
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// End date in YYYY-MM-DD format.
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SplitsArgs {
     /// Stock ticker symbol (e.g. AAPL, TSLA).
     pub ticker: String,
     /// Filter splits with ex-date on or after this date (YYYY-MM-DD).
+    #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
     /// Filter splits with ex-date on or before this date (YYYY-MM-DD).
+    #[serde(default)]
     pub end_date: Option<chrono::NaiveDate>,
 }
 
@@ -342,7 +396,10 @@ impl TiingoServer {
     }
 
     #[rmcp::tool(description = "Get definitions for Tiingo fundamental data fields.")]
-    async fn get_fundamentals_definitions(&self) -> CallToolResult {
+    async fn get_fundamentals_definitions(
+        &self,
+        Parameters(_args): Parameters<FundamentalsDefinitionsArgs>,
+    ) -> CallToolResult {
         tool_result(self.client.get_fundamentals_definitions().await)
     }
 
