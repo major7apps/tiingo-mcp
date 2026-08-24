@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.0 (Unreleased)
+
+### Breaking changes
+
+- Replaced the server implementation with a native Rust binary built on RMCP.
+- Changed installation and launch to the direct `tiingo-mcp` command; the PyPI and `uvx` contract has been deliberately removed.
+- Kept stdio as the MCP transport for 2.0. Streamable HTTP and WebSocket work remains a separate expansion.
+
+### Distribution
+
+- Added cargo-dist shell and PowerShell installers plus native artifacts for Apple Silicon and Intel macOS, ARM64 and x86-64 Linux, and x86-64 Windows.
+- Added target-specific MCPB desktop bundles with path-free binary configuration and secure API-key prompting.
+- Added Rust 1.88, stable-toolchain, dependency-policy, native-build, version, and MCPB validation gates.
+
+### Protocol and correctness
+
+- Preserved the 17 tools, three fixed resources, one guide template, five prompts, and compatible input schemas.
+- Added structured MCP tool results while retaining the JSON text content expected by older clients.
+- Corrected recoverable failures to use MCP tool-error semantics and sanitized error content.
+- Bounded transient retries to three total attempts, enforced same-origin requests and an 8 MiB response limit, and redacted credentials from all errors.
+- Updated crypto quotes to Tiingo's current prices route.
+- Corrected stale resource facts and replaced timeless plan guarantees with source-dated capability guidance.
+- Corrected stock, earnings, and forex prompts so they request supported metadata and do not infer unsupported conclusions.
+
 ## 1.1.0 (2026-04-13)
 
 ### Resources (4)
@@ -41,4 +65,4 @@ Initial release.
 - Automatic retries on transient errors
 - Structured error handling (401, 403, 404, 429, 5xx)
 - PyPI-publishable, installable via `uvx tiingo-mcp`
-- stdio and HTTP transport support
+- stdio transport support
