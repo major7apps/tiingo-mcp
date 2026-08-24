@@ -13,6 +13,8 @@ jobs:
   rust:
     name: Rust ${{ matrix.rust }}
     runs-on: ubuntu-24.04
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     strategy:
       matrix:
         rust: ["1.88.0", stable]
@@ -25,6 +27,12 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           components: clippy, rustfmt
+
+      - name: Show active Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
