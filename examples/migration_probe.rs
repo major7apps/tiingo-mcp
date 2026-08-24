@@ -68,7 +68,7 @@ fn percentile_index(length: usize, percentile: f64) -> usize {
 
 fn median_f64(sorted: &[f64]) -> f64 {
     let upper = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
+    if sorted.len().is_multiple_of(2) {
         (sorted[upper - 1] + sorted[upper]) / 2.0
     } else {
         sorted[upper]
@@ -77,7 +77,7 @@ fn median_f64(sorted: &[f64]) -> f64 {
 
 fn median_u64(sorted: &[u64]) -> u64 {
     let upper = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
+    if sorted.len().is_multiple_of(2) {
         ((u128::from(sorted[upper - 1]) + u128::from(sorted[upper])) / 2) as u64
     } else {
         sorted[upper]
