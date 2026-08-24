@@ -4,12 +4,24 @@ use crate::client::TiingoClient;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{ExtensionCapabilities, Implementation, JsonObject, ServerCapabilities, ServerInfo},
+    model::{
+        ExtensionCapabilities, Implementation, JsonObject, MetaObject, ServerCapabilities,
+        ServerInfo,
+    },
 };
 
 pub mod prompts;
 pub mod resources;
 pub mod tools;
+
+pub(crate) fn compatibility_descriptor_meta() -> MetaObject {
+    MetaObject(
+        serde_json::json!({"fastmcp": {"tags": []}})
+            .as_object()
+            .expect("compatibility metadata is an object")
+            .clone(),
+    )
+}
 
 #[derive(Clone, Debug)]
 pub struct TiingoServer {

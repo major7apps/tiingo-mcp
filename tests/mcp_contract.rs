@@ -25,6 +25,9 @@ const OFFICIAL_SOURCES: [&str; 2] = [
     "https://www.tiingo.com/documentation/general/overview",
     "https://api.tiingo.com/documentation/end-of-day",
 ];
+const PYTHON_INITIALIZE_INSTRUCTIONS: &str = "Financial data server powered by Tiingo. Provides real-time and historical stock prices, forex rates, crypto data, news, fundamentals, and corporate actions. All date parameters use YYYY-MM-DD format.";
+const RUST_INITIALIZE_INSTRUCTIONS: &str =
+    "Financial data server powered by Tiingo. Dates use YYYY-MM-DD.";
 
 fn child_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"));
@@ -49,7 +52,6 @@ fn normalize_schema(value: Value) -> Value {
     match value {
         Value::Array(values) => Value::Array(values.into_iter().map(normalize_schema).collect()),
         Value::Object(mut object) => {
-            object.remove("$schema");
             for value in object.values_mut() {
                 *value = normalize_schema(value.take());
             }
@@ -82,6 +84,76 @@ fn normalize_schema(value: Value) -> Value {
     }
 }
 
+fn remove_exact(object: &mut Map<String, Value>, key: &str, expected: Value) {
+    let actual = object
+        .remove(key)
+        .unwrap_or_else(|| panic!("frozen contract lost {key}"));
+    assert_eq!(actual, expected, "frozen contract changed {key}");
+}
+
+fn replace_exact(object: &mut Map<String, Value>, key: &str, expected: Value, replacement: Value) {
+    remove_exact(object, key, expected);
+    assert!(
+        object.insert(key.to_owned(), replacement).is_none(),
+        "{key} unexpectedly remained after exact removal"
+    );
+}
+
+fn insert_delta(object: &mut Map<String, Value>, key: &str, value: Value) {
+    assert!(
+        !object.contains_key(key),
+        "frozen contract unexpectedly already contains additive delta {key}"
+    );
+    object.insert(key.to_owned(), value);
+}
+
+fn replace_exact_once(text: &str, old: &str, new: &str) -> String {
+    assert_eq!(
+        text.matches(old).count(),
+        1,
+        "frozen contract changed approved text delta {old:?}"
+    );
+    text.replacen(old, new, 1)
+}
+
+fn normalize_protocol_metadata(result: &mut Map<String, Value>) {
+    if let Some(result_type) = result.remove("resultType") {
+        assert_eq!(result_type, "complete", "unexpected resultType shape");
+    }
+    if let Some(ttl_ms) = result.remove("ttlMs") {
+        assert!(ttl_ms.as_u64().is_some(), "unexpected ttlMs shape");
+    }
+    if let Some(cache_scope) = result.remove("cacheScope") {
+        assert!(
+            matches!(cache_scope.as_str(), Some("public" | "private")),
+            "unexpected cacheScope shape"
+        );
+    }
+}
+
+fn canonical_initialize(mut result: Value, expected: bool) -> Value {
+    let object = result
+        .as_object_mut()
+        .expect("initialize result is an object");
+    let server_info = object["serverInfo"]
+        .as_object_mut()
+        .expect("serverInfo is an object");
+    assert!(
+        server_info.get("version").is_some_and(Value::is_string),
+        "implementation version must be a string"
+    );
+    server_info.insert("version".to_owned(), Value::String("<ignored>".to_owned()));
+    if expected {
+        replace_exact(
+            object,
+            "instructions",
+            Value::String(PYTHON_INITIALIZE_INSTRUCTIONS.to_owned()),
+            Value::String(RUST_INITIALIZE_INSTRUCTIONS.to_owned()),
+        );
+    }
+    result
+}
+
 fn structured_output_schema() -> Value {
     serde_json::json!({
         "additionalProperties": false,
@@ -99,19 +171,34 @@ fn structured_output_schema() -> Value {
     })
 }
 
+fn python_output_schema() -> Value {
+    serde_json::json!({
+        "description": "Generic wrapper for non-object return types.",
+        "properties": {"result": {"type": "string"}},
+        "required": ["result"],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+    })
+}
+
 fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
     for tool in &mut tools {
-        tool.as_object_mut().unwrap().remove("_meta");
         if expected {
             if tool["name"] == "get_crypto_quote" {
-                let description = tool["description"].as_str().unwrap().replacen(
+                let old = tool["description"].as_str().unwrap();
+                let description = replace_exact_once(
+                    old,
                     "Get current top-of-book crypto prices.",
                     "Get current crypto prices.",
-                    1,
                 );
                 tool["description"] = Value::String(description);
             }
-            tool["outputSchema"] = structured_output_schema();
+            replace_exact(
+                tool.as_object_mut().unwrap(),
+                "outputSchema",
+                python_output_schema(),
+                structured_output_schema(),
+            );
         }
         tool["inputSchema"] = normalize_schema(tool["inputSchema"].take());
         tool["outputSchema"] = normalize_schema(tool["outputSchema"].take());
@@ -121,9 +208,6 @@ fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
 }
 
 fn canonical_list(mut items: Vec<Value>, field: &str) -> Vec<Value> {
-    for item in &mut items {
-        item.as_object_mut().unwrap().remove("_meta");
-    }
     sort_by_string_field(&mut items, field);
     items
 }
@@ -132,16 +216,41 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     let object = body.as_object_mut().unwrap();
     match uri {
         "tiingo://capabilities" => {
-            object.remove("server_version");
-            object.remove("rate_limits");
-            object.remove("plan_restrictions");
-            object.insert("as_of".to_owned(), Value::String(SOURCE_DATE.to_owned()));
-            object.insert(
-                "entitlements_change_over_time".to_owned(),
-                Value::Bool(true),
+            remove_exact(object, "server_version", serde_json::json!("1.1.0"));
+            remove_exact(
+                object,
+                "rate_limits",
+                serde_json::json!({"free": "50 req/hr", "power": "5000 req/hr"}),
             );
-            object.insert(
-                "official_sources".to_owned(),
+            remove_exact(
+                object,
+                "plan_restrictions",
+                serde_json::json!({
+                    "free_tier": [
+                        "get_stock_metadata",
+                        "get_stock_prices",
+                        "get_realtime_price",
+                        "get_intraday_prices",
+                        "get_forex_quote",
+                        "get_forex_prices",
+                        "get_crypto_quote",
+                        "get_crypto_prices",
+                        "get_crypto_metadata",
+                        "get_news",
+                        "get_fundamentals_definitions",
+                        "get_financial_statements",
+                        "get_daily_fundamentals",
+                        "get_company_meta",
+                        "get_dividend_yield"
+                    ],
+                    "paid_tier_required": ["get_dividends", "get_splits"]
+                }),
+            );
+            insert_delta(object, "as_of", Value::String(SOURCE_DATE.to_owned()));
+            insert_delta(object, "entitlements_change_over_time", Value::Bool(true));
+            insert_delta(
+                object,
+                "official_sources",
                 serde_json::json!(OFFICIAL_SOURCES),
             );
         }
@@ -151,9 +260,27 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
         | "tiingo://guide/fundamentals"
         | "tiingo://guide/news"
         | "tiingo://guide/stocks" => {
-            object.remove("plan_restrictions");
-            object.insert(
-                "availability".to_owned(),
+            let old_restriction = match uri {
+                "tiingo://guide/corporate-actions" => {
+                    "get_dividends and get_splits return 403 on free tier; get_dividend_yield is available on free tier."
+                }
+                "tiingo://guide/crypto" | "tiingo://guide/forex" | "tiingo://guide/news" => {
+                    "Available on free tier."
+                }
+                "tiingo://guide/fundamentals" => {
+                    "All fundamentals endpoints available on free tier."
+                }
+                "tiingo://guide/stocks" => "All stock endpoints available on free tier.",
+                _ => unreachable!(),
+            };
+            remove_exact(
+                object,
+                "plan_restrictions",
+                Value::String(old_restriction.to_owned()),
+            );
+            insert_delta(
+                object,
+                "availability",
                 serde_json::json!({
                     "as_of": SOURCE_DATE,
                     "official_sources": OFFICIAL_SOURCES,
@@ -161,18 +288,28 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
                 }),
             );
             if uri == "tiingo://guide/corporate-actions" {
-                object["common_pitfalls"].as_array_mut().unwrap().remove(0);
+                let pitfalls = object["common_pitfalls"].as_array_mut().unwrap();
+                assert_eq!(
+                    pitfalls.first(),
+                    Some(&serde_json::json!(
+                        "get_dividends and get_splits require a paid plan -- free tier returns 403."
+                    )),
+                    "frozen corporate-actions entitlement pitfall changed"
+                );
+                pitfalls.remove(0);
             } else if uri == "tiingo://guide/crypto" {
-                object.insert(
-                    "current_price_route".to_owned(),
+                insert_delta(
+                    object,
+                    "current_price_route",
                     Value::String("/tiingo/crypto/prices".to_owned()),
                 );
             } else if uri == "tiingo://guide/stocks" {
-                let ticker_format = object["ticker_format"]
-                    .as_str()
-                    .unwrap()
-                    .replace("BRK.B", "BRK-A");
-                object.insert("ticker_format".to_owned(), Value::String(ticker_format));
+                replace_exact(
+                    object,
+                    "ticker_format",
+                    Value::String("Uppercase symbols, e.g. AAPL, MSFT, GOOGL, BRK.B".to_owned()),
+                    Value::String("Uppercase symbols, e.g. AAPL, MSFT, GOOGL, BRK-A".to_owned()),
+                );
             }
         }
         _ => {}
@@ -181,15 +318,21 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
 }
 
 fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
-    result.as_object_mut().unwrap().remove("resultType");
-    result.as_object_mut().unwrap().remove("_meta");
+    normalize_protocol_metadata(result.as_object_mut().unwrap());
     for content in result["contents"].as_array_mut().unwrap() {
-        content.as_object_mut().unwrap().remove("_meta");
         let mut body: Value = serde_json::from_str(content["text"].as_str().unwrap()).unwrap();
         if expected {
             body = expected_resource_body(uri, body);
         } else if uri == "tiingo://capabilities" {
-            body.as_object_mut().unwrap().remove("server_version");
+            let version = body
+                .as_object_mut()
+                .unwrap()
+                .remove("server_version")
+                .expect("capabilities server_version is present");
+            assert!(
+                version.is_string(),
+                "capabilities server_version is a string"
+            );
         }
         content["text"] = body;
     }
@@ -198,18 +341,26 @@ fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Va
 
 fn corrected_prompt_text(name: &str, text: &str) -> String {
     match name {
-        "analyze-stock" => text
-            .replace(
-                "2. Call get_stock_prices",
-                "2. Call get_company_meta with tickers=AAPL to retrieve sector and industry.\n3. Call get_stock_prices",
-            )
-            .replace("\n3. Call get_daily_fundamentals", "\n4. Call get_daily_fundamentals")
-            .replace("\n4. Call get_news", "\n5. Call get_news"),
-        "earnings-report-analysis" => text.replace(
+        "analyze-stock" => replace_exact_once(
+            &replace_exact_once(
+                &replace_exact_once(
+                    text,
+                    "2. Call get_stock_prices",
+                    "2. Call get_company_meta with tickers=AAPL to retrieve sector and industry.\n3. Call get_stock_prices",
+                ),
+                "\n3. Call get_daily_fundamentals",
+                "\n4. Call get_daily_fundamentals",
+            ),
+            "\n4. Call get_news",
+            "\n5. Call get_news",
+        ),
+        "earnings-report-analysis" => replace_exact_once(
+            text,
             "- **Beat or Miss**: Did the company beat or miss expectations based on trends?",
             "- **Expectations Context**: Do not label the result a beat or miss unless an article supplies an explicit consensus comparison.",
         ),
-        "forex-pair-analysis" => text.replace(
+        "forex-pair-analysis" => replace_exact_once(
+            text,
             "- **Notable Moves**: Any significant spikes or drops and their likely causes.",
             "- **Notable Moves**: Identify significant spikes or drops, but state that price history alone cannot establish their cause.",
         ),
@@ -218,8 +369,7 @@ fn corrected_prompt_text(name: &str, text: &str) -> String {
 }
 
 fn canonical_prompt_result(name: &str, mut result: Value, expected: bool) -> Value {
-    result.as_object_mut().unwrap().remove("resultType");
-    result.as_object_mut().unwrap().remove("_meta");
+    normalize_protocol_metadata(result.as_object_mut().unwrap());
     if expected {
         let text = result["messages"][0]["content"]["text"].as_str().unwrap();
         result["messages"][0]["content"]["text"] = Value::String(corrected_prompt_text(name, text));
@@ -261,12 +411,9 @@ async fn child_process_contract() -> anyhow::Result<()> {
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);
 
-    let mut expected_initialize = baseline["initialize"].clone();
-    expected_initialize["serverInfo"]["version"] = Value::String("<ignored>".to_owned());
-    expected_initialize["instructions"] =
-        Value::String("Financial data server powered by Tiingo. Dates use YYYY-MM-DD.".to_owned());
-    let mut actual_initialize = serde_json::to_value(client.peer_info().unwrap())?;
-    actual_initialize["serverInfo"]["version"] = Value::String("<ignored>".to_owned());
+    let expected_initialize = canonical_initialize(baseline["initialize"].clone(), true);
+    let actual_initialize =
+        canonical_initialize(serde_json::to_value(client.peer_info().unwrap())?, false);
     assert_eq!(actual_initialize, expected_initialize, "initialize drifted");
 
     let actual_tools = serde_json::to_value(client.list_all_tools().await?)?
@@ -420,4 +567,148 @@ async fn approved_crypto_route_and_bounded_retry_delta_are_explicit() -> anyhow:
         serde_json::json!({"ok": true})
     );
     Ok(())
+}
+
+#[test]
+fn canonicalization_preserves_unapproved_metadata() {
+    let items = vec![serde_json::json!({
+        "name": "example",
+        "_meta": {"future-extension": {"enabled": true}}
+    })];
+
+    assert_eq!(canonical_list(items.clone(), "name"), items);
+}
+
+#[test]
+fn approved_output_schema_delta_rejects_a_mutated_frozen_source() {
+    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+    let mut tools = baseline["tools"].as_array().unwrap().clone();
+    tools[0]["outputSchema"]["properties"]["result"]["type"] = Value::String("number".into());
+
+    assert!(
+        std::panic::catch_unwind(|| canonical_tools(tools, true)).is_err(),
+        "canonicalization overwrote a mutated frozen output schema"
+    );
+}
+
+fn frozen_resource_body(baseline: &Value, uri: &str) -> Value {
+    serde_json::from_str(
+        baseline["resource_contents"][uri][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+fn assert_transform_rejects(label: &str, transform: impl FnOnce() + std::panic::UnwindSafe) {
+    assert!(
+        std::panic::catch_unwind(transform).is_err(),
+        "canonicalization accepted mutated frozen {label}"
+    );
+}
+
+#[test]
+fn every_approved_delta_rejects_mutated_frozen_values() {
+    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+
+    let mut initialize = baseline["initialize"].clone();
+    initialize["instructions"] = Value::String(RUST_INITIALIZE_INSTRUCTIONS.to_owned());
+    assert_transform_rejects("initialize instructions", move || {
+        canonical_initialize(initialize, true);
+    });
+
+    let mut tools = baseline["tools"].as_array().unwrap().clone();
+    let crypto = tools
+        .iter_mut()
+        .find(|tool| tool["name"] == "get_crypto_quote")
+        .unwrap();
+    crypto["description"] = Value::String(
+        crypto["description"]
+            .as_str()
+            .unwrap()
+            .replace("top-of-book crypto", "crypto"),
+    );
+    assert_transform_rejects("crypto description", move || {
+        canonical_tools(tools, true);
+    });
+
+    for key in [
+        "server_version",
+        "rate_limits",
+        "plan_restrictions",
+        "as_of",
+        "entitlements_change_over_time",
+        "official_sources",
+    ] {
+        let mut body = frozen_resource_body(&baseline, "tiingo://capabilities");
+        body[key] = Value::String("mutated".to_owned());
+        assert_transform_rejects(key, move || {
+            expected_resource_body("tiingo://capabilities", body);
+        });
+    }
+
+    for uri in [
+        "tiingo://guide/corporate-actions",
+        "tiingo://guide/crypto",
+        "tiingo://guide/forex",
+        "tiingo://guide/fundamentals",
+        "tiingo://guide/news",
+        "tiingo://guide/stocks",
+    ] {
+        let mut body = frozen_resource_body(&baseline, uri);
+        body["plan_restrictions"] = Value::String("mutated".to_owned());
+        assert_transform_rejects(uri, move || {
+            expected_resource_body(uri, body);
+        });
+    }
+
+    let mut corporate = frozen_resource_body(&baseline, "tiingo://guide/corporate-actions");
+    corporate["common_pitfalls"][0] = Value::String("mutated".to_owned());
+    assert_transform_rejects("corporate-actions pitfall", move || {
+        expected_resource_body("tiingo://guide/corporate-actions", corporate);
+    });
+
+    let mut crypto = frozen_resource_body(&baseline, "tiingo://guide/crypto");
+    crypto["current_price_route"] = Value::String("/mutated".to_owned());
+    assert_transform_rejects("crypto current route", move || {
+        expected_resource_body("tiingo://guide/crypto", crypto);
+    });
+
+    let mut stocks = frozen_resource_body(&baseline, "tiingo://guide/stocks");
+    stocks["ticker_format"] = Value::String("mutated".to_owned());
+    assert_transform_rejects("stock symbology", move || {
+        expected_resource_body("tiingo://guide/stocks", stocks);
+    });
+
+    let mut guide = frozen_resource_body(&baseline, "tiingo://guide/news");
+    guide["availability"] = serde_json::json!({"mutated": true});
+    assert_transform_rejects("availability source metadata", move || {
+        expected_resource_body("tiingo://guide/news", guide);
+    });
+
+    for (name, old, replacement) in [
+        (
+            "analyze-stock",
+            "2. Call get_stock_prices",
+            "2. Call mutated_stock_prices",
+        ),
+        (
+            "earnings-report-analysis",
+            "- **Beat or Miss**: Did the company beat or miss expectations based on trends?",
+            "- **Mutated**",
+        ),
+        (
+            "forex-pair-analysis",
+            "- **Notable Moves**: Any significant spikes or drops and their likely causes.",
+            "- **Mutated**",
+        ),
+    ] {
+        let text = baseline["prompt_results"][name]["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .replace(old, replacement);
+        assert_transform_rejects(name, move || {
+            corrected_prompt_text(name, &text);
+        });
+    }
 }

@@ -222,6 +222,20 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
     assert_eq!(tools.len(), TOOL_NAMES.len());
     assert_eq!(actual_names, expected_names);
 
+    for tool in &tools {
+        assert!(
+            !tool.input_schema.contains_key("$schema"),
+            "{} advertised an unapproved $schema field",
+            tool.name
+        );
+        assert_eq!(
+            serde_json::to_value(&tool.meta).unwrap(),
+            serde_json::json!({"fastmcp": {"tags": []}}),
+            "{} discovery metadata drifted",
+            tool.name
+        );
+    }
+
     for expected in EXPECTED_TOOL_SCHEMAS {
         let tool = tools
             .iter()

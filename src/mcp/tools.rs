@@ -260,7 +260,12 @@ fn range(start_date: Option<chrono::NaiveDate>, end_date: Option<chrono::NaiveDa
 }
 
 pub(crate) fn tool_router() -> ToolRouter<TiingoServer> {
-    TiingoServer::tool_router()
+    let mut router = TiingoServer::tool_router();
+    for route in router.map.values_mut() {
+        Arc::make_mut(&mut route.attr.input_schema).remove("$schema");
+        route.attr.meta = Some(super::compatibility_descriptor_meta());
+    }
+    router
 }
 
 #[rmcp::tool_router(router = tool_router)]

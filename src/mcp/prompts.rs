@@ -4,6 +4,8 @@ use rmcp::{
 };
 use serde_json::{Map, Value};
 
+use super::compatibility_descriptor_meta;
+
 const STRING_ARGUMENT_DESCRIPTION: &str =
     "Provide as a JSON string matching the following schema: {\"type\":\"string\"}";
 const BOOLEAN_ARGUMENT_DESCRIPTION: &str =
@@ -16,7 +18,7 @@ fn argument(name: &str, description: &str, required: bool) -> PromptArgument {
 }
 
 pub fn list() -> Vec<Prompt> {
-    vec![
+    let mut prompts = vec![
         Prompt::new(
             "analyze-stock",
             Some("Comprehensive single-stock analysis: metadata, prices, fundamentals, and news"),
@@ -61,7 +63,11 @@ pub fn list() -> Vec<Prompt> {
                 argument("period", STRING_ARGUMENT_DESCRIPTION, false),
             ]),
         ),
-    ]
+    ];
+    for prompt in &mut prompts {
+        prompt.meta = Some(compatibility_descriptor_meta());
+    }
+    prompts
 }
 
 fn required_string(arguments: &Map<String, Value>, name: &str) -> Result<String, ErrorData> {

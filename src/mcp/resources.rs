@@ -3,6 +3,8 @@ use rmcp::{
     model::{ReadResourceResult, Resource, ResourceContents, ResourceTemplate},
 };
 
+use super::compatibility_descriptor_meta;
+
 const CAPABILITIES: &str = include_str!("data/capabilities.json");
 const DEFINITIONS: &str = include_str!("data/fundamentals-definitions.json");
 const DATE_FORMATS: &str = include_str!("data/date-formats.json");
@@ -19,7 +21,8 @@ pub fn list() -> Vec<Resource> {
             .with_description(
                 "Server capabilities, supported asset classes, rate limits, and plan restrictions",
             )
-            .with_mime_type("text/plain"),
+            .with_mime_type("text/plain")
+            .with_meta(compatibility_descriptor_meta()),
         Resource::new(
             "tiingo://fundamentals/definitions",
             "fundamentals_definitions_resource",
@@ -27,12 +30,14 @@ pub fn list() -> Vec<Resource> {
         .with_description(
             "Curated reference of common fundamental metrics with descriptions and statement types",
         )
-        .with_mime_type("text/plain"),
+        .with_mime_type("text/plain")
+        .with_meta(compatibility_descriptor_meta()),
         Resource::new("tiingo://guide/date-formats", "date_formats_resource")
             .with_description(
                 "Date format, resample frequencies, sort options, and parameter reference for all endpoints",
             )
-            .with_mime_type("text/plain"),
+            .with_mime_type("text/plain")
+            .with_meta(compatibility_descriptor_meta()),
     ]
 }
 
@@ -45,7 +50,8 @@ pub fn templates() -> Vec<ResourceTemplate> {
         .with_description(
             "Usage guide for a specific asset class: tools, workflows, ticker formats, and pitfalls",
         )
-        .with_mime_type("text/plain"),
+        .with_mime_type("text/plain")
+        .with_meta(compatibility_descriptor_meta()),
     ]
 }
 
