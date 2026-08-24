@@ -32,8 +32,8 @@ impl RetryPolicy {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.max_attempts == 0 {
-            anyhow::bail!("retry policy must allow at least one attempt");
+        if !(1..=3).contains(&self.max_attempts) {
+            anyhow::bail!("retry policy must allow between one and three attempts");
         }
         Ok(())
     }

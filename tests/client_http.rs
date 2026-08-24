@@ -46,6 +46,14 @@ fn only_safe_transient_statuses_retry() {
     }
 }
 
+#[test]
+fn rejects_retry_policies_that_allow_more_than_three_attempts() {
+    let mut config = test_config(Url::parse("http://127.0.0.1:9").unwrap(), Some("test-key"));
+    config.retry.max_attempts = 4;
+
+    assert!(TiingoClient::new(config).is_err());
+}
+
 #[tokio::test]
 async fn sends_token_authentication_and_only_supplied_query_values() {
     let server = MockServer::start().await;
@@ -126,6 +134,72 @@ async fn does_not_retry_authentication_failures() {
         .unwrap_err();
 
     assert!(matches!(error, TiingoError::Authentication { .. }));
+}
+
+#[tokio::test]
+async fn rejects_cross_origin_paths_before_contacting_another_server() {
+    let configured_server = MockServer::start().await;
+    let alternate_server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(
+        Url::parse(&configured_server.uri()).unwrap(),
+        Some("test-key"),
+    ))
+    .unwrap();
+
+    let absolute = client
+        .get_json(
+            "stock prices",
+            &format!("{}/tiingo/daily/AAPL", alternate_server.uri()),
+            &[],
+        )
+        .await
+        .unwrap_err();
+    let network_path = client
+        .get_json(
+            "stock prices",
+            &format!("//{}/tiingo/daily/AAPL", alternate_server.address()),
+            &[],
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(absolute, TiingoError::Validation(_)));
+    assert!(matches!(network_path, TiingoError::Validation(_)));
+    assert!(
+        alternate_server
+            .received_requests()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn upstream_error_payload_and_display_never_expose_credentials() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(500)
+                .set_body_string("key=test-key\\nAuthorization: Token test-key"),
+        )
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(
+        Url::parse(&server.uri()).unwrap(),
+        Some("test-key"),
+    ))
+    .unwrap();
+
+    let error = client
+        .get_json("stock prices", "/tiingo/daily/AAPL", &[])
+        .await
+        .unwrap_err();
+    let payload = error.payload();
+
+    assert!(!error.to_string().contains("test-key"));
+    assert!(!error.to_string().contains("Token test-key"));
+    assert!(!payload.message.contains("test-key"));
+    assert!(!payload.message.contains("Token test-key"));
 }
 
 #[tokio::test]

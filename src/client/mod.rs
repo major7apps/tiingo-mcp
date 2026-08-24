@@ -37,14 +37,19 @@ impl TiingoClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, TiingoError> {
-        let api_key = self.config.api_key.as_deref().ok_or_else(|| {
-            TiingoError::Configuration("set TIINGO_API_KEY before calling Tiingo tools".to_owned())
-        })?;
         let url = self
             .config
             .base_url
             .join(path)
             .map_err(|_| TiingoError::Validation("invalid Tiingo route".to_owned()))?;
+        if url.origin() != self.config.base_url.origin() {
+            return Err(TiingoError::Validation(
+                "Tiingo route must use the configured origin".to_owned(),
+            ));
+        }
+        let api_key = self.config.api_key.as_deref().ok_or_else(|| {
+            TiingoError::Configuration("set TIINGO_API_KEY before calling Tiingo tools".to_owned())
+        })?;
         let mut authorization =
             HeaderValue::from_str(&format!("Token {api_key}")).map_err(|_| {
                 TiingoError::Configuration("TIINGO_API_KEY contains invalid characters".to_owned())
@@ -73,9 +78,9 @@ impl TiingoClient {
             {
                 Ok(value) => return Ok(value),
                 Err(failure) if failure.retryable && attempt < self.config.retry.max_attempts => {
-                    let delay = failure.retry_after.unwrap_or_else(|| self.backoff(attempt));
+                    let delay = retry_delay(failure.retry_after, self.backoff(attempt));
                     last_error = Some(failure.error);
-                    tokio::time::sleep(delay.min(self.config.retry.max_delay)).await;
+                    tokio::time::sleep(delay).await;
                 }
                 Err(failure) => return Err(failure.error),
             }
@@ -203,6 +208,10 @@ fn parse_retry_after(value: &HeaderValue) -> Option<Duration> {
         .ok()
 }
 
+fn retry_delay(retry_after: Option<Duration>, fallback: Duration) -> Duration {
+    retry_after.unwrap_or(fallback)
+}
+
 async fn bounded_error_text(
     response: reqwest::Response,
     api_key: &str,
@@ -221,4 +230,18 @@ async fn bounded_error_text(
     }
     let text = String::from_utf8_lossy(&bytes).replace(api_key, "[REDACTED]");
     sanitize_detail(&text, max_chars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_retry_after_is_not_capped() {
+        let retry_after = parse_retry_after(&HeaderValue::from_static("60"));
+        assert_eq!(
+            retry_delay(retry_after, Duration::ZERO),
+            Duration::from_secs(60)
+        );
+    }
 }
