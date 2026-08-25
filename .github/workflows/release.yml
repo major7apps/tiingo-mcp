@@ -316,7 +316,8 @@ jobs:
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
-          RELEASE_TITLE="${RELEASE_TAG#v}"
+          RELEASE_TITLE="${RELEASE_TAG##*/}"
+          RELEASE_TITLE="${RELEASE_TITLE#v}"
 
           gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$RELEASE_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
