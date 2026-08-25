@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, future::Future, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
@@ -59,6 +59,7 @@ pub(super) async fn run_worker(
             return;
         }
     };
+    let mut acknowledged_subscription_ids = vec![subscription_id.clone()];
     set_status(&session, SubscriptionStatus::Active).await;
     if initial.send(Ok(())).is_err() {
         close_socket(&mut socket, &codec, authorization, subscription_id, symbols).await;
@@ -72,7 +73,7 @@ pub(super) async fn run_worker(
         let liveness_deadline = last_liveness + WEBSOCKET_LIVENESS_TIMEOUT;
         let reconnect = tokio::select! {
             _ = sleep_until(liveness_deadline) => {
-                let _ = socket.close(None).await;
+                bounded_close_socket(&mut socket).await;
                 true
             }
             _ = sleep_until(expiry_deadline) => {
@@ -103,56 +104,81 @@ pub(super) async fn run_worker(
             command = commands.recv() => {
                 match command {
                     Some(WorkerCommand::Update { add_symbols, remove_symbols, response }) => {
-                        match apply_update(
-                            &mut socket,
-                            &codec,
+                        let update = run_with_session_control(
                             &session,
-                            clock.as_ref(),
-                            &mut last_liveness,
-                            authorization.clone(),
-                            &mut subscription_id,
-                            &mut symbols,
-                            add_symbols,
-                            remove_symbols,
-                        ).await {
-                            Ok(()) => {
+                            &mut cancel,
+                            apply_update(
+                                &mut socket,
+                                &codec,
+                                &session,
+                                clock.as_ref(),
+                                &mut last_liveness,
+                                authorization.clone(),
+                                &mut subscription_id,
+                                &mut acknowledged_subscription_ids,
+                                &mut symbols,
+                                add_symbols,
+                                remove_symbols,
+                            ),
+                        )
+                        .await;
+                        match update {
+                            Controlled::Cancelled => {
+                                let _ = response.send(Err(TiingoError::Transport {
+                                    capability: CAPABILITY,
+                                }));
+                                close_socket(
+                                    &mut socket,
+                                    &codec,
+                                    authorization,
+                                    subscription_id,
+                                    symbols,
+                                )
+                                .await;
+                                set_status(&session, SubscriptionStatus::Stopped).await;
+                                return;
+                            }
+                            Controlled::Expired => {
+                                let _ = response.send(Err(TiingoError::Timeout {
+                                    capability: CAPABILITY,
+                                }));
+                                close_socket(
+                                    &mut socket,
+                                    &codec,
+                                    authorization,
+                                    subscription_id,
+                                    symbols,
+                                )
+                                .await;
+                                set_status(&session, SubscriptionStatus::Expired).await;
+                                return;
+                            }
+                            Controlled::Completed(Ok(())) => {
                                 session.data.lock().await.symbols = symbols.clone();
                                 let _ = response.send(Ok(symbols.clone()));
                                 false
                             }
-                            Err(error @ TiingoError::Validation(_)) => {
+                            Controlled::Completed(Err(error @ TiingoError::Validation(_))) => {
                                 let _ = response.send(Err(error));
                                 false
                             }
-                            Err(error @ TiingoError::Transport { .. }) => {
+                            Controlled::Completed(Err(error @ TiingoError::Transport { .. })) => {
                                 let _ = response.send(Err(error));
-                                let _ = socket.close(None).await;
+                                bounded_close_socket(&mut socket).await;
                                 true
                             }
-                            Err(error) => {
+                            Controlled::Completed(Err(error)) => {
                                 if session.data.lock().await.status != SubscriptionStatus::DataGap {
                                     set_status(&session, SubscriptionStatus::Failed).await;
                                 }
                                 let _ = response.send(Err(error));
-                                let _ = socket.close(None).await;
+                                bounded_close_socket(&mut socket).await;
                                 return;
                             }
                         }
                     }
-                    Some(WorkerCommand::Stop { response }) => {
-                        close_socket(
-                            &mut socket,
-                            &codec,
-                            authorization,
-                            subscription_id,
-                            symbols,
-                        ).await;
-                        set_status(&session, SubscriptionStatus::Stopped).await;
-                        let _ = response.send(());
-                        return;
-                    }
                     None => {
-                        let _ = socket.close(None).await;
+                        bounded_close_socket(&mut socket).await;
                         set_status(&session, SubscriptionStatus::Stopped).await;
                         return;
                     }
@@ -165,6 +191,7 @@ pub(super) async fn run_worker(
                             &session,
                             &codec,
                             &authorization,
+                            &acknowledged_subscription_ids,
                             clock.now(),
                             payload.as_bytes(),
                         )
@@ -177,23 +204,59 @@ pub(super) async fn run_worker(
                                 false
                             }
                             Ok(QueueOutcome::DataGap) => {
-                                let _ = socket.close(None).await;
+                                bounded_close_socket(&mut socket).await;
                                 return;
                             }
                             Err(_) => {
                                 set_status(&session, SubscriptionStatus::Failed).await;
-                                let _ = socket.close(None).await;
+                                bounded_close_socket(&mut socket).await;
                                 return;
                             }
                         }
                     }
                     Some(Ok(Message::Ping(payload))) => {
-                        let _ = socket.send(Message::Pong(payload)).await;
-                        false
+                        match run_with_session_control(
+                            &session,
+                            &mut cancel,
+                            timeout(WEBSOCKET_ACK_TIMEOUT, socket.send(Message::Pong(payload))),
+                        )
+                        .await
+                        {
+                            Controlled::Completed(Ok(Ok(()))) => false,
+                            Controlled::Completed(Ok(Err(_)))
+                            | Controlled::Completed(Err(_)) => {
+                                bounded_close_socket(&mut socket).await;
+                                true
+                            }
+                            Controlled::Cancelled => {
+                                close_socket(
+                                    &mut socket,
+                                    &codec,
+                                    authorization,
+                                    subscription_id,
+                                    symbols,
+                                )
+                                .await;
+                                set_status(&session, SubscriptionStatus::Stopped).await;
+                                return;
+                            }
+                            Controlled::Expired => {
+                                close_socket(
+                                    &mut socket,
+                                    &codec,
+                                    authorization,
+                                    subscription_id,
+                                    symbols,
+                                )
+                                .await;
+                                set_status(&session, SubscriptionStatus::Expired).await;
+                                return;
+                            }
+                        }
                     }
                     Some(Ok(Message::Binary(_))) => {
                         set_status(&session, SubscriptionStatus::Failed).await;
-                        let _ = socket.close(None).await;
+                        bounded_close_socket(&mut socket).await;
                         return;
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => true,
@@ -219,6 +282,20 @@ pub(super) async fn run_worker(
         {
             ReconnectOutcome::Connected(new_socket, new_subscription_id) => {
                 socket = *new_socket;
+                if remember_subscription_id(
+                    &mut acknowledged_subscription_ids,
+                    &new_subscription_id,
+                ) && redact_retained_events(
+                    &session,
+                    &authorization,
+                    &acknowledged_subscription_ids,
+                )
+                .await
+                .is_err()
+                {
+                    bounded_close_socket(&mut socket).await;
+                    return;
+                }
                 subscription_id = new_subscription_id;
                 last_liveness = Instant::now();
                 set_status(&session, SubscriptionStatus::Active).await;
@@ -268,6 +345,35 @@ enum ReconnectOutcome {
     Failed,
 }
 
+enum Controlled<T> {
+    Completed(T),
+    Cancelled,
+    Expired,
+}
+
+async fn run_with_session_control<F>(
+    session: &Session,
+    cancel: &mut watch::Receiver<bool>,
+    operation: F,
+) -> Controlled<F::Output>
+where
+    F: Future,
+{
+    tokio::pin!(operation);
+    loop {
+        let expiry_at = expiry_deadline(session).await;
+        tokio::select! {
+            _ = cancel.changed() => return Controlled::Cancelled,
+            _ = sleep_until(expiry_at) => {
+                if is_expired(session).await {
+                    return Controlled::Expired;
+                }
+            }
+            result = &mut operation => return Controlled::Completed(result),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn reconnect_connection(
     session: &Session,
@@ -296,15 +402,28 @@ async fn reconnect_connection(
             }
         }
 
-        let result = tokio::select! {
-            _ = cancel.changed() => return ReconnectOutcome::Stopped,
-            result = timeout(
+        let result = match run_with_session_control(
+            session,
+            cancel,
+            timeout(
                 WEBSOCKET_ACK_TIMEOUT,
-                establish_connection(connector, codec, service, authorization.clone(), symbols.clone()),
-            ) => match result {
-                Ok(result) => result,
-                Err(_) => Err(TiingoError::Timeout { capability: CAPABILITY }),
-            },
+                establish_connection(
+                    connector,
+                    codec,
+                    service,
+                    authorization.clone(),
+                    symbols.clone(),
+                ),
+            ),
+        )
+        .await
+        {
+            Controlled::Completed(Ok(result)) => result,
+            Controlled::Completed(Err(_)) => Err(TiingoError::Timeout {
+                capability: CAPABILITY,
+            }),
+            Controlled::Cancelled => return ReconnectOutcome::Stopped,
+            Controlled::Expired => return ReconnectOutcome::Expired,
         };
         match result {
             Ok((socket, subscription_id)) => {
@@ -339,6 +458,7 @@ async fn apply_update(
     last_liveness: &mut Instant,
     authorization: Authorization,
     subscription_id: &mut SubscriptionId,
+    acknowledged_subscription_ids: &mut Vec<SubscriptionId>,
     symbols: &mut Vec<String>,
     add_symbols: Vec<String>,
     remove_symbols: Vec<String>,
@@ -346,32 +466,46 @@ async fn apply_update(
     validate_resulting_symbols(symbols, &add_symbols, &remove_symbols)?;
 
     if !remove_symbols.is_empty() {
-        *subscription_id = send_update_and_ack(
+        let acknowledged_subscription_id = send_update_and_ack(
             socket,
             codec,
             session,
             clock,
             last_liveness,
+            acknowledged_subscription_ids,
             SubscriptionAction::Unsubscribe,
             authorization.clone(),
             subscription_id.clone(),
             remove_symbols.clone(),
         )
         .await?;
+        let is_new =
+            remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
+        *subscription_id = acknowledged_subscription_id;
+        if is_new {
+            redact_retained_events(session, &authorization, acknowledged_subscription_ids).await?;
+        }
     }
     if !add_symbols.is_empty() {
-        *subscription_id = send_update_and_ack(
+        let acknowledged_subscription_id = send_update_and_ack(
             socket,
             codec,
             session,
             clock,
             last_liveness,
+            acknowledged_subscription_ids,
             SubscriptionAction::Subscribe,
-            authorization,
+            authorization.clone(),
             subscription_id.clone(),
             add_symbols.clone(),
         )
         .await?;
+        let is_new =
+            remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
+        *subscription_id = acknowledged_subscription_id;
+        if is_new {
+            redact_retained_events(session, &authorization, acknowledged_subscription_ids).await?;
+        }
     }
     symbols.retain(|symbol| !remove_symbols.contains(symbol));
     symbols.extend(add_symbols);
@@ -415,6 +549,7 @@ async fn send_update_and_ack(
     session: &Session,
     clock: &dyn ReceiveClock,
     last_liveness: &mut Instant,
+    acknowledged_subscription_ids: &[SubscriptionId],
     action: SubscriptionAction,
     authorization: Authorization,
     subscription_id: SubscriptionId,
@@ -425,16 +560,24 @@ async fn send_update_and_ack(
     let payload = serde_json::to_string(&command).map_err(|_| TiingoError::WebSocketProtocol {
         reason: "subscription update could not be encoded",
     })?;
-    socket
-        .send(Message::text(payload))
+    timeout(WEBSOCKET_ACK_TIMEOUT, async {
+        socket
+            .send(Message::text(payload))
+            .await
+            .map_err(|_| TiingoError::Transport {
+                capability: CAPABILITY,
+            })?;
+        wait_for_update_ack(
+            socket,
+            codec,
+            &authorization,
+            acknowledged_subscription_ids,
+            session,
+            clock,
+            last_liveness,
+        )
         .await
-        .map_err(|_| TiingoError::Transport {
-            capability: CAPABILITY,
-        })?;
-    timeout(
-        WEBSOCKET_ACK_TIMEOUT,
-        wait_for_update_ack(socket, codec, &authorization, session, clock, last_liveness),
-    )
+    })
     .await
     .map_err(|_| TiingoError::Timeout {
         capability: CAPABILITY,
@@ -450,6 +593,7 @@ async fn queue_text_message(
     session: &Session,
     codec: &ProtocolCodec,
     authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
     received_at: DateTime<Utc>,
     payload: &[u8],
 ) -> Result<QueueOutcome, TiingoError> {
@@ -505,7 +649,7 @@ async fn queue_text_message(
         serde_json::from_slice(payload).map_err(|_| TiingoError::WebSocketProtocol {
             reason: "message is not one complete JSON object",
         })?;
-    redact_authorization(&mut value, authorization);
+    redact_sensitive_value(&mut value, authorization, acknowledged_subscription_ids);
     let (vendor_timestamp, symbol) = message_identity(&received.message);
 
     let mut data = session.data.lock().await;
@@ -542,8 +686,12 @@ async fn queue_text_message(
     let event = MarketDataEvent {
         sequence: data.next_sequence,
         received_at,
-        vendor_timestamp,
-        symbol,
+        vendor_timestamp: vendor_timestamp.map(|timestamp| {
+            redact_sensitive_text(&timestamp, authorization, acknowledged_subscription_ids)
+        }),
+        symbol: symbol.map(|symbol| {
+            redact_sensitive_text(&symbol, authorization, acknowledged_subscription_ids)
+        }),
         duplicate,
         out_of_order,
         payload: value,
@@ -555,7 +703,7 @@ async fn queue_text_message(
         .len();
     let single_event_poll_bytes = serde_json::to_vec(&PollResult {
         id: "0".repeat(32),
-        state: data.status,
+        state: SubscriptionStatus::Reconnecting,
         events: vec![event.clone()],
     })
     .map_err(|_| TiingoError::WebSocketProtocol {
@@ -578,12 +726,18 @@ async fn queue_text_message(
     Ok(QueueOutcome::Continue { refresh_liveness })
 }
 
-fn redact_authorization(value: &mut Value, authorization: &Authorization) {
+fn redact_sensitive_value(
+    value: &mut Value,
+    authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
+) {
     match value {
-        Value::String(text) => *text = authorization.redact(text),
+        Value::String(text) => {
+            *text = redact_sensitive_text(text, authorization, acknowledged_subscription_ids);
+        }
         Value::Array(values) => {
             for value in values {
-                redact_authorization(value, authorization);
+                redact_sensitive_value(value, authorization, acknowledged_subscription_ids);
             }
         }
         Value::Object(values) => {
@@ -592,13 +746,109 @@ fn redact_authorization(value: &mut Value, authorization: &Authorization) {
                 if key.eq_ignore_ascii_case("subscriptionId") {
                     value = Value::String("[REDACTED]".into());
                 } else {
-                    redact_authorization(&mut value, authorization);
+                    redact_sensitive_value(
+                        &mut value,
+                        authorization,
+                        acknowledged_subscription_ids,
+                    );
                 }
-                values.insert(authorization.redact(&key), value);
+                values.insert(
+                    redact_sensitive_text(&key, authorization, acknowledged_subscription_ids),
+                    value,
+                );
             }
         }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        Value::Number(number) => {
+            let encoded = number.to_string();
+            if redact_sensitive_text(&encoded, authorization, acknowledged_subscription_ids)
+                != encoded
+            {
+                *value = Value::String("[REDACTED]".into());
+            }
+        }
+        Value::Null | Value::Bool(_) => {}
     }
+}
+
+fn redact_sensitive_text(
+    value: &str,
+    authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
+) -> String {
+    let mut redacted = authorization.redact(value);
+    for subscription_id in acknowledged_subscription_ids {
+        let secret = match subscription_id {
+            SubscriptionId::Number(value) => value.to_string(),
+            SubscriptionId::String(value) => value.clone(),
+        };
+        if !secret.is_empty() {
+            redacted = redacted.replace(&secret, "[REDACTED]");
+        }
+    }
+    redacted
+}
+
+fn remember_subscription_id(
+    acknowledged_subscription_ids: &mut Vec<SubscriptionId>,
+    subscription_id: &SubscriptionId,
+) -> bool {
+    if !acknowledged_subscription_ids.contains(subscription_id) {
+        acknowledged_subscription_ids.push(subscription_id.clone());
+        true
+    } else {
+        false
+    }
+}
+
+async fn redact_retained_events(
+    session: &Session,
+    authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
+) -> Result<(), TiingoError> {
+    let mut data = session.data.lock().await;
+    let mut queue_bytes = 0_usize;
+    let mut exceeds_bounds = false;
+    for event in &mut data.events {
+        redact_sensitive_value(
+            &mut event.payload,
+            authorization,
+            acknowledged_subscription_ids,
+        );
+        event.vendor_timestamp = event.vendor_timestamp.as_deref().map(|timestamp| {
+            redact_sensitive_text(timestamp, authorization, acknowledged_subscription_ids)
+        });
+        event.symbol = event.symbol.as_deref().map(|symbol| {
+            redact_sensitive_text(symbol, authorization, acknowledged_subscription_ids)
+        });
+        let event_bytes = serde_json::to_vec(event)
+            .map_err(|_| TiingoError::WebSocketProtocol {
+                reason: "retained market event could not be encoded",
+            })?
+            .len();
+        let poll_bytes = serde_json::to_vec(&PollResult {
+            id: "0".repeat(32),
+            state: SubscriptionStatus::Reconnecting,
+            events: vec![event.clone()],
+        })
+        .map_err(|_| TiingoError::WebSocketProtocol {
+            reason: "retained market event could not be encoded",
+        })?
+        .len();
+        queue_bytes = queue_bytes.saturating_add(event_bytes);
+        exceeds_bounds |= poll_bytes > MAX_WEBSOCKET_POLL_BYTES;
+    }
+    exceeds_bounds |= queue_bytes > MAX_WEBSOCKET_QUEUE_BYTES;
+    if exceeds_bounds {
+        data.events.clear();
+        data.queue_bytes = 0;
+        drop(data);
+        set_status(session, SubscriptionStatus::DataGap).await;
+        return Err(TiingoError::WebSocketProtocol {
+            reason: "retained market data exceeded the bounded queue after redaction",
+        });
+    }
+    data.queue_bytes = queue_bytes;
+    Ok(())
 }
 
 fn message_identity(message: &ServerMessage) -> (Option<String>, Option<String>) {
@@ -624,6 +874,7 @@ async fn wait_for_update_ack(
     socket: &mut ClientSocket,
     codec: &ProtocolCodec,
     authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
     session: &Session,
     clock: &dyn ReceiveClock,
     last_liveness: &mut Instant,
@@ -657,6 +908,7 @@ async fn wait_for_update_ack(
                     session,
                     codec,
                     authorization,
+                    acknowledged_subscription_ids,
                     received_at,
                     payload.as_bytes(),
                 )
@@ -842,6 +1094,10 @@ fn collect_response_text(value: &Value, output: &mut String) {
         }
         _ => {}
     }
+}
+
+async fn bounded_close_socket(socket: &mut ClientSocket) {
+    let _ = timeout(WEBSOCKET_ACK_TIMEOUT, socket.close(None)).await;
 }
 
 async fn close_socket(

@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Weak,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
 
@@ -32,6 +32,7 @@ use crate::{
 };
 
 const CAPABILITY: &str = "WebSocket market data";
+const MAX_RETAINED_TERMINAL_SESSIONS: usize = MAX_WEBSOCKET_SESSIONS;
 
 mod worker;
 
@@ -122,7 +123,9 @@ struct RegistryInner {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     shutdown_lock: Mutex<()>,
     active_sessions: Arc<AtomicUsize>,
+    terminal_counter: Arc<AtomicU64>,
     shutting_down: AtomicBool,
+    shutdown_complete: AtomicBool,
 }
 
 struct Session {
@@ -134,6 +137,8 @@ struct Session {
     notify: Notify,
     active_sessions: Arc<AtomicUsize>,
     active_slot_held: AtomicBool,
+    terminal_counter: Arc<AtomicU64>,
+    terminal_order: AtomicU64,
 }
 
 struct SessionData {
@@ -267,9 +272,6 @@ enum WorkerCommand {
         remove_symbols: Vec<String>,
         response: oneshot::Sender<Result<Vec<String>, TiingoError>>,
     },
-    Stop {
-        response: oneshot::Sender<()>,
-    },
 }
 
 impl MarketDataRegistry {
@@ -306,7 +308,9 @@ impl MarketDataRegistry {
                 sessions: Mutex::new(HashMap::new()),
                 shutdown_lock: Mutex::new(()),
                 active_sessions: Arc::new(AtomicUsize::new(0)),
+                terminal_counter: Arc::new(AtomicU64::new(0)),
                 shutting_down: AtomicBool::new(false),
+                shutdown_complete: AtomicBool::new(false),
             }),
         }
     }
@@ -352,6 +356,7 @@ impl MarketDataRegistry {
                     "at most eight WebSocket subscriptions may be active in this process".into(),
                 ));
             }
+            prune_terminal_sessions(&mut sessions).await;
             let session_id = loop {
                 let candidate = format!("{:032x}", rand::random::<u128>());
                 if !sessions.contains_key(&candidate) {
@@ -382,6 +387,8 @@ impl MarketDataRegistry {
                 notify: Notify::new(),
                 active_sessions: Arc::clone(&self.inner.active_sessions),
                 active_slot_held: AtomicBool::new(true),
+                terminal_counter: Arc::clone(&self.inner.terminal_counter),
+                terminal_order: AtomicU64::new(0),
             });
             let worker_session = Arc::clone(&session);
             let handle = tokio::spawn(async move {
@@ -424,6 +431,15 @@ impl MarketDataRegistry {
         };
         match result {
             Ok(()) => {
+                let publication = self.inner.shutdown_lock.lock().await;
+                if self.inner.shutting_down.load(Ordering::Acquire) {
+                    drop(publication);
+                    cleanup_session(&self.inner, &session_id, true).await;
+                    guard.armed = false;
+                    return Err(TiingoError::Validation(
+                        "the WebSocket registry is shutting down".into(),
+                    ));
+                }
                 guard.armed = false;
                 Ok(StartResult {
                     id: session_id,
@@ -523,37 +539,8 @@ impl MarketDataRegistry {
 
     pub async fn stop(&self, session_id: &str) -> Result<StopResult, TiingoError> {
         let session = self.session(session_id).await?;
+        let _ = session.cancel.send(true);
         let _mutation = session.mutation.lock().await;
-        let status = session.data.lock().await.status;
-        if status == SubscriptionStatus::Stopped {
-            join_session(&session).await;
-            return Ok(StopResult {
-                id: session_id.to_owned(),
-                state: SubscriptionStatus::Stopped,
-            });
-        }
-
-        if status == SubscriptionStatus::Reconnecting {
-            let _ = session.cancel.send(true);
-            join_session(&session).await;
-            set_status(&session, SubscriptionStatus::Stopped).await;
-            return Ok(StopResult {
-                id: session_id.to_owned(),
-                state: SubscriptionStatus::Stopped,
-            });
-        }
-
-        let (response, stopped) = oneshot::channel();
-        if session
-            .commands
-            .send(WorkerCommand::Stop { response })
-            .await
-            .is_ok()
-        {
-            let _ = stopped.await;
-        } else {
-            let _ = session.cancel.send(true);
-        }
         join_session(&session).await;
         set_status(&session, SubscriptionStatus::Stopped).await;
         Ok(StopResult {
@@ -574,9 +561,10 @@ impl MarketDataRegistry {
 
     pub async fn shutdown(&self) {
         let _shutdown = self.inner.shutdown_lock.lock().await;
-        if self.inner.shutting_down.swap(true, Ordering::AcqRel) {
+        if self.inner.shutdown_complete.load(Ordering::Acquire) {
             return;
         }
+        self.inner.shutting_down.store(true, Ordering::Release);
         let sessions = {
             let sessions = self.inner.sessions.lock().await;
             sessions.values().cloned().collect::<Vec<_>>()
@@ -588,6 +576,7 @@ impl MarketDataRegistry {
             join_session(&session).await;
         }
         self.inner.sessions.lock().await.clear();
+        self.inner.shutdown_complete.store(true, Ordering::Release);
     }
 }
 
@@ -628,17 +617,51 @@ async fn cleanup_session(registry: &Arc<RegistryInner>, session_id: &str, remove
 
 async fn join_session(session: &Session) {
     let mut join = session.join.lock().await;
-    if let Some(handle) = join.take() {
+    if let Some(handle) = join.as_mut() {
         let _ = handle.await;
     }
+    *join = None;
 }
 
 async fn set_status(session: &Session, status: SubscriptionStatus) {
-    session.data.lock().await.status = status;
+    {
+        let mut data = session.data.lock().await;
+        if is_terminal(status) && !is_terminal(data.status) {
+            let terminal_order = session.terminal_counter.fetch_add(1, Ordering::AcqRel) + 1;
+            session
+                .terminal_order
+                .store(terminal_order, Ordering::Release);
+        }
+        data.status = status;
+    }
     if is_terminal(status) && session.active_slot_held.swap(false, Ordering::AcqRel) {
         session.active_sessions.fetch_sub(1, Ordering::AcqRel);
     }
     session.notify.notify_waiters();
+}
+
+async fn prune_terminal_sessions(sessions: &mut HashMap<String, Arc<Session>>) {
+    loop {
+        let oldest = sessions
+            .iter()
+            .filter_map(|(session_id, session)| {
+                let order = session.terminal_order.load(Ordering::Acquire);
+                (order != 0).then(|| (order, session_id.clone(), Arc::clone(session)))
+            })
+            .min_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        let terminal_count = sessions
+            .values()
+            .filter(|session| session.terminal_order.load(Ordering::Acquire) != 0)
+            .count();
+        if terminal_count < MAX_RETAINED_TERMINAL_SESSIONS {
+            return;
+        }
+        let Some((_, session_id, session)) = oldest else {
+            return;
+        };
+        join_session(&session).await;
+        sessions.remove(&session_id);
+    }
 }
 
 async fn poll_snapshot(
