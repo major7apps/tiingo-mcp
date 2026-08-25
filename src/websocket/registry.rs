@@ -459,17 +459,43 @@ impl MarketDataRegistry {
         session_id: &str,
         after_sequence: u64,
     ) -> Result<PollResult, TiingoError> {
+        self.poll_with_bounds(
+            session_id,
+            after_sequence,
+            MAX_WEBSOCKET_POLL_EVENTS,
+            WEBSOCKET_POLL_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn poll_with_bounds(
+        &self,
+        session_id: &str,
+        after_sequence: u64,
+        limit: usize,
+        max_wait: std::time::Duration,
+    ) -> Result<PollResult, TiingoError> {
+        if limit > MAX_WEBSOCKET_POLL_EVENTS {
+            return Err(TiingoError::Validation(
+                "a WebSocket poll may return at most 256 events".into(),
+            ));
+        }
+        if max_wait > WEBSOCKET_POLL_TIMEOUT {
+            return Err(TiingoError::Validation(
+                "a WebSocket poll may wait at most 5000 milliseconds".into(),
+            ));
+        }
         let session = self.session(session_id).await?;
         touch_session(&session).await;
-        let deadline = Instant::now() + WEBSOCKET_POLL_TIMEOUT;
+        let deadline = Instant::now() + max_wait;
         loop {
             let notified = session.notify.notified();
-            let result = poll_snapshot(session_id, &session, after_sequence).await?;
+            let result = poll_snapshot(session_id, &session, after_sequence, limit).await?;
             if !result.events.is_empty() || is_terminal(result.state) {
                 return Ok(result);
             }
             if timeout_at(deadline, notified).await.is_err() {
-                return poll_snapshot(session_id, &session, after_sequence).await;
+                return poll_snapshot(session_id, &session, after_sequence, limit).await;
             }
         }
     }
@@ -668,6 +694,7 @@ async fn poll_snapshot(
     session_id: &str,
     session: &Session,
     after_sequence: u64,
+    limit: usize,
 ) -> Result<PollResult, TiingoError> {
     let data = session.data.lock().await;
     let mut result = PollResult {
@@ -679,7 +706,7 @@ async fn poll_snapshot(
         .events
         .iter()
         .filter(|event| event.sequence > after_sequence)
-        .take(MAX_WEBSOCKET_POLL_EVENTS)
+        .take(limit)
     {
         result.events.push(event.clone());
         let serialized_len = serde_json::to_vec(&result)

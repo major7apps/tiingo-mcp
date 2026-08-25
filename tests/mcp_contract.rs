@@ -308,7 +308,7 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
                 object,
                 "tool_count",
                 Value::Number(17.into()),
-                Value::Number(34.into()),
+                Value::Number(38.into()),
             );
             remove_exact(
                 object,
@@ -546,7 +546,7 @@ async fn child_process_contract() -> anyhow::Result<()> {
     let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
-    assert_eq!(client.list_all_tools().await?.len(), 34);
+    assert_eq!(client.list_all_tools().await?.len(), 38);
     assert_eq!(client.list_all_resources().await?.len(), 3);
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);

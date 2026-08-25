@@ -1,10 +1,16 @@
 use crate::{
     client::query::{DateRange, EodResample, IexResample, IntradayResample, NewsQuery, NewsSort},
     error::TiingoError,
+    websocket::{
+        protocol::Service,
+        registry::{StartRequest, UpdateRequest},
+    },
 };
 use rmcp::{
+    RoleServer,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, JsonObject},
+    service::RequestContext,
 };
 use std::sync::Arc;
 
@@ -359,8 +365,78 @@ pub struct SplitsByExDateArgs {
     pub ex_date: Option<chrono::NaiveDate>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MarketDataService {
+    Iex,
+    Consolidated,
+}
+
+impl From<MarketDataService> for Service {
+    fn from(service: MarketDataService) -> Self {
+        match service {
+            MarketDataService::Iex => Self::Iex,
+            MarketDataService::Consolidated => Self::Consolidated,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartMarketDataSubscriptionArgs {
+    #[schemars(schema_with = "market_data_service_schema")]
+    pub service: MarketDataService,
+    pub symbols: Vec<String>,
+    #[serde(default)]
+    pub threshold_level: Option<u8>,
+    #[serde(default)]
+    pub confirm_iex_market_data_agreement: bool,
+}
+
+const fn default_market_data_poll_limit() -> usize {
+    256
+}
+
+const fn default_market_data_poll_wait_ms() -> u64 {
+    5_000
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PollMarketDataSubscriptionArgs {
+    pub subscription_id: String,
+    #[serde(default)]
+    pub after_sequence: u64,
+    #[serde(default = "default_market_data_poll_limit")]
+    #[schemars(range(max = 256))]
+    pub limit: usize,
+    #[serde(default = "default_market_data_poll_wait_ms")]
+    #[schemars(range(max = 5000))]
+    pub max_wait_ms: u64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateMarketDataSubscriptionArgs {
+    pub subscription_id: String,
+    #[serde(default)]
+    pub add_symbols: Vec<String>,
+    #[serde(default)]
+    pub remove_symbols: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StopMarketDataSubscriptionArgs {
+    pub subscription_id: String,
+}
+
 fn nullable_integer_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type": ["integer", "null"]})
+}
+
+fn market_data_service_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"enum": ["iex", "consolidated"], "type": "string"})
 }
 
 fn structured_output_schema() -> Arc<JsonObject> {
@@ -408,6 +484,16 @@ fn tool_result(response: Result<serde_json::Value, TiingoError>) -> CallToolResu
         Ok(value) => success_result(value),
         Err(error) => error_result(error),
     }
+}
+
+fn serializable_tool_result<T: serde::Serialize>(
+    response: Result<T, TiingoError>,
+) -> CallToolResult {
+    tool_result(
+        response.map(|value| {
+            serde_json::to_value(value).expect("market-data lifecycle result serializes")
+        }),
+    )
 }
 
 fn range(start_date: Option<chrono::NaiveDate>, end_date: Option<chrono::NaiveDate>) -> DateRange {
@@ -922,5 +1008,84 @@ impl TiingoServer {
         Parameters(args): Parameters<SplitsByExDateArgs>,
     ) -> CallToolResult {
         tool_result(self.client.get_splits_by_ex_date(args.ex_date).await)
+    }
+
+    #[rmcp::tool(
+        description = "Start a bounded IEX or consolidated equity market-data subscription.",
+        output_schema = structured_output_schema()
+    )]
+    async fn start_market_data_subscription(
+        &self,
+        Parameters(args): Parameters<StartMarketDataSubscriptionArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let start = self.market_data.start(StartRequest {
+            service: args.service.into(),
+            symbols: args.symbols,
+            threshold_level: args.threshold_level,
+            confirm_iex_market_data_agreement: args.confirm_iex_market_data_agreement,
+        });
+        tokio::select! {
+            result = start => serializable_tool_result(result),
+            _ = context.ct.cancelled() => error_result(TiingoError::Validation(
+                "the market-data start request was cancelled".into(),
+            )),
+        }
+    }
+
+    #[rmcp::tool(
+        description = "Poll a bounded market-data subscription by local arrival sequence.",
+        output_schema = structured_output_schema()
+    )]
+    async fn poll_market_data_subscription(
+        &self,
+        Parameters(args): Parameters<PollMarketDataSubscriptionArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let poll = self.market_data.poll_with_bounds(
+            &args.subscription_id,
+            args.after_sequence,
+            args.limit,
+            std::time::Duration::from_millis(args.max_wait_ms),
+        );
+        tokio::select! {
+            result = poll => serializable_tool_result(result),
+            _ = context.ct.cancelled() => error_result(TiingoError::Validation(
+                "the market-data poll request was cancelled".into(),
+            )),
+        }
+    }
+
+    #[rmcp::tool(
+        description = "Add or remove symbols on an active market-data subscription.",
+        output_schema = structured_output_schema()
+    )]
+    async fn update_market_data_subscription(
+        &self,
+        Parameters(args): Parameters<UpdateMarketDataSubscriptionArgs>,
+    ) -> CallToolResult {
+        serializable_tool_result(
+            self.market_data
+                .update(
+                    &args.subscription_id,
+                    UpdateRequest {
+                        add_symbols: args.add_symbols,
+                        remove_symbols: args.remove_symbols,
+                        threshold_level: None,
+                    },
+                )
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Stop a market-data subscription and await worker cleanup.",
+        output_schema = structured_output_schema()
+    )]
+    async fn stop_market_data_subscription(
+        &self,
+        Parameters(args): Parameters<StopMarketDataSubscriptionArgs>,
+    ) -> CallToolResult {
+        serializable_tool_result(self.market_data.stop(&args.subscription_id).await)
     }
 }

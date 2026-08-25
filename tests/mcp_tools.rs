@@ -4,16 +4,20 @@ use std::{
 };
 
 use anyhow::Context;
+use futures_util::{SinkExt, StreamExt};
 use rmcp::{
     RoleClient, ServiceExt,
-    model::{CallToolRequestParams, JsonObject},
-    service::RunningService,
+    model::{CallToolRequest, CallToolRequestParams, ClientRequest, JsonObject},
+    service::{PeerRequestOptions, RequestHandle, RunningService},
 };
 use tiingo_mcp::{
     client::TiingoClient,
     config::{Config, RetryPolicy},
     mcp::{TiingoServer, tools::IntradayPricesArgs},
+    websocket::registry::{MarketDataRegistry, TiingoConnector},
 };
+use tokio::net::TcpListener;
+use tokio_tungstenite::{accept_async, tungstenite::Message};
 use url::Url;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -69,9 +73,13 @@ struct Connection {
 
 impl Connection {
     async fn new(tiingo_client: TiingoClient) -> Self {
+        Self::with_server(TiingoServer::with_client(tiingo_client)).await
+    }
+
+    async fn with_server(tiingo_server: TiingoServer) -> Self {
         let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
         let server = tokio::spawn(async move {
-            TiingoServer::with_client(tiingo_client)
+            tiingo_server
                 .serve(server_transport)
                 .await?
                 .waiting()
@@ -90,6 +98,23 @@ impl Connection {
 
 fn arguments(value: serde_json::Value) -> JsonObject {
     value.as_object().unwrap().clone()
+}
+
+async fn cancellable_tool_request(
+    connection: &Connection,
+    name: &'static str,
+    call_arguments: serde_json::Value,
+) -> RequestHandle<RoleClient> {
+    connection
+        .client
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(CallToolRequest::new(
+                CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)),
+            )),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .unwrap()
 }
 
 fn assert_accurate_success(
@@ -119,6 +144,28 @@ fn assert_accurate_success(
         })),
         "{tool_name} changed the structured payload"
     );
+}
+
+fn success_data(tool_name: &str, result: &rmcp::model::CallToolResult) -> serde_json::Value {
+    assert_eq!(
+        result.is_error,
+        Some(false),
+        "{tool_name} returned an error"
+    );
+    let text = &result.content[0]
+        .as_text()
+        .expect("successful tools retain a JSON text block")
+        .text;
+    let data = serde_json::from_str::<serde_json::Value>(text).unwrap();
+    assert_eq!(
+        result.structured_content,
+        Some(serde_json::json!({
+            "data": data,
+            "meta": {"source": "tiingo"}
+        })),
+        "{tool_name} changed JSON text/structured data parity"
+    );
+    data
 }
 
 struct ToolCase {
@@ -339,7 +386,7 @@ struct ExpectedToolSchema {
     optional: &'static [&'static str],
 }
 
-const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 28] = [
+const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 32] = [
     ExpectedToolSchema {
         name: "get_stock_metadata",
         properties: &["ticker"],
@@ -560,6 +607,35 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 28] = [
         required: &["pool_code"],
         optional: &["start_date", "end_date", "resample_freq"],
     },
+    ExpectedToolSchema {
+        name: "start_market_data_subscription",
+        properties: &[
+            "service",
+            "symbols",
+            "threshold_level",
+            "confirm_iex_market_data_agreement",
+        ],
+        required: &["service", "symbols"],
+        optional: &["threshold_level"],
+    },
+    ExpectedToolSchema {
+        name: "poll_market_data_subscription",
+        properties: &["subscription_id", "after_sequence", "limit", "max_wait_ms"],
+        required: &["subscription_id"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "update_market_data_subscription",
+        properties: &["subscription_id", "add_symbols", "remove_symbols"],
+        required: &["subscription_id"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "stop_market_data_subscription",
+        properties: &["subscription_id"],
+        required: &["subscription_id"],
+        optional: &[],
+    },
 ];
 
 #[tokio::test]
@@ -574,7 +650,7 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         .collect::<BTreeSet<_>>();
     let expected_names = TOOL_NAMES.into_iter().collect::<BTreeSet<_>>();
 
-    assert_eq!(tools.len(), 34);
+    assert_eq!(tools.len(), 38);
     assert!(expected_names.is_subset(&actual_names));
     assert!(actual_names.contains("get_bulk_eod_prices"));
     assert!(actual_names.contains("get_ticker_metadata"));
@@ -593,6 +669,10 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
     assert!(actual_names.contains("get_crypto_yield_pools"));
     assert!(actual_names.contains("get_crypto_yield_ticks"));
     assert!(actual_names.contains("get_crypto_yield_metrics"));
+    assert!(actual_names.contains("start_market_data_subscription"));
+    assert!(actual_names.contains("poll_market_data_subscription"));
+    assert!(actual_names.contains("update_market_data_subscription"));
+    assert!(actual_names.contains("stop_market_data_subscription"));
 
     for tool in &tools {
         assert!(
@@ -702,6 +782,594 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         );
     }
 
+    let start = tools
+        .iter()
+        .find(|tool| tool.name == "start_market_data_subscription")
+        .unwrap();
+    assert_eq!(
+        start.input_schema["properties"]["service"]["enum"],
+        serde_json::json!(["iex", "consolidated"])
+    );
+    assert_eq!(
+        start.input_schema["properties"]["confirm_iex_market_data_agreement"]["default"],
+        false
+    );
+
+    let poll = tools
+        .iter()
+        .find(|tool| tool.name == "poll_market_data_subscription")
+        .unwrap();
+    for (field, default, maximum) in [
+        ("after_sequence", serde_json::json!(0), None),
+        ("limit", serde_json::json!(256), Some(256)),
+        ("max_wait_ms", serde_json::json!(5000), Some(5000)),
+    ] {
+        assert_eq!(poll.input_schema["properties"][field]["default"], default);
+        if let Some(maximum) = maximum {
+            assert_eq!(poll.input_schema["properties"][field]["maximum"], maximum);
+        }
+    }
+
+    let update = tools
+        .iter()
+        .find(|tool| tool.name == "update_market_data_subscription")
+        .unwrap();
+    for field in ["add_symbols", "remove_symbols"] {
+        assert_eq!(
+            update.input_schema["properties"][field]["default"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            update.input_schema["properties"][field]["items"]["type"],
+            "string"
+        );
+    }
+    assert!(
+        update.input_schema["properties"]
+            .as_object()
+            .unwrap()
+            .get("threshold_level")
+            .is_none()
+    );
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+
+        let subscribe = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&subscribe).unwrap(),
+            serde_json::json!({
+                "eventName": "subscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"thresholdLevel": 6, "tickers": ["AAPL", "SPY"]}
+            })
+        );
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 41},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        for (timestamp, price) in [
+            ("2026-08-25T14:00:00Z", 101.0),
+            ("2026-08-25T14:00:01Z", 102.0),
+        ] {
+            socket
+                .send(Message::text(
+                    serde_json::json!({
+                        "messageType": "A",
+                        "service": "iex",
+                        "data": [timestamp, "AAPL", price]
+                    })
+                    .to_string(),
+                ))
+                .await
+                .unwrap();
+        }
+
+        let remove = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&remove).unwrap(),
+            serde_json::json!({
+                "eventName": "unsubscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"subscriptionId": 41, "tickers": ["SPY"]}
+            })
+        );
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 42},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let add = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&add).unwrap(),
+            serde_json::json!({
+                "eventName": "subscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"subscriptionId": 42, "tickers": ["MSFT"]}
+            })
+        );
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 43},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let stop = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stop).unwrap(),
+            serde_json::json!({
+                "eventName": "unsubscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"subscriptionId": 43, "tickers": ["AAPL", "MSFT"]}
+            })
+        );
+        let _ = socket.next().await;
+    });
+
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let server = TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    );
+    let connection = Connection::with_server(server).await;
+
+    let started = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({
+                    "service": "iex",
+                    "symbols": ["aapl", "SPY"]
+                }),
+            )),
+        )
+        .await
+        .unwrap();
+    let started = success_data("start_market_data_subscription", &started);
+    assert_eq!(started["state"], "active");
+    let subscription_id = started["id"].as_str().unwrap();
+    assert_eq!(subscription_id.len(), 32);
+    assert!(
+        subscription_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+
+    let polled = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("poll_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "after_sequence": 0,
+                    "limit": 1,
+                    "max_wait_ms": 100
+                }),
+            )),
+        )
+        .await
+        .unwrap();
+    let polled = success_data("poll_market_data_subscription", &polled);
+    assert_eq!(polled["id"], subscription_id);
+    assert_eq!(polled["state"], "active");
+    assert_eq!(polled["events"].as_array().unwrap().len(), 1);
+    assert_eq!(polled["events"][0]["sequence"], 1);
+    assert_eq!(
+        polled["events"][0]["payload"],
+        serde_json::json!({
+            "messageType": "A",
+            "service": "iex",
+            "data": ["2026-08-25T14:00:00Z", "AAPL", 101.0]
+        })
+    );
+
+    let updated = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("update_market_data_subscription").with_arguments(
+                arguments(serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "add_symbols": ["msft"],
+                    "remove_symbols": ["SPY"]
+                })),
+            ),
+        )
+        .await
+        .unwrap();
+    let updated = success_data("update_market_data_subscription", &updated);
+    assert_eq!(
+        updated,
+        serde_json::json!({
+            "id": subscription_id,
+            "state": "active",
+            "symbols": ["AAPL", "MSFT"]
+        })
+    );
+
+    let stopped = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("stop_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"subscription_id": subscription_id}),
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        success_data("stop_market_data_subscription", &stopped),
+        serde_json::json!({"id": subscription_id, "state": "stopped"})
+    );
+    let stopped_again = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("stop_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"subscription_id": subscription_id}),
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        success_data("stop_market_data_subscription", &stopped_again),
+        serde_json::json!({"id": subscription_id, "state": "stopped"})
+    );
+
+    websocket.await.unwrap();
+    registry.shutdown().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn websocket_entitlement_rejection_is_a_sanitized_mcp_tool_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "E",
+                    "response": {
+                        "code": 403,
+                        "message": "not entitled to mcp-ws-secret or upstream-secret"
+                    }
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let _ = socket.next().await;
+    });
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let connection = Connection::with_server(TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    ))
+    .await;
+
+    let result = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"service": "iex", "symbols": ["AAPL"]}),
+            )),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.is_error, Some(true));
+    let text = result.content[0].as_text().unwrap();
+    let payload = serde_json::from_str::<serde_json::Value>(&text.text).unwrap();
+    assert_eq!(payload["kind"], "entitlement");
+    assert_eq!(
+        result.structured_content.as_ref().unwrap()["error"],
+        payload
+    );
+    let serialized = serde_json::to_string(&result).unwrap();
+    assert!(!serialized.contains("mcp-ws-secret"));
+    assert!(!serialized.contains("upstream-secret"));
+
+    websocket.await.unwrap();
+    registry.shutdown().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn cancelling_mcp_start_during_ack_wait_joins_its_socket_worker() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let (subscribed_tx, subscribed_rx) = tokio::sync::oneshot::channel();
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        subscribed_tx.send(()).unwrap();
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                return;
+            }
+        }
+    });
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let connection = Connection::with_server(TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    ))
+    .await;
+
+    let request = cancellable_tool_request(
+        &connection,
+        "start_market_data_subscription",
+        serde_json::json!({"service": "iex", "symbols": ["AAPL"]}),
+    )
+    .await;
+    subscribed_rx.await.unwrap();
+    request
+        .cancel(Some("test cancellation".into()))
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_millis(500), websocket)
+        .await
+        .expect("cancelled MCP start leaked its WebSocket worker")
+        .unwrap();
+    registry.shutdown().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn cancelling_mcp_poll_leaves_subscription_active_and_stop_cleanup_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let (unsubscribe_tx, unsubscribe_rx) = tokio::sync::oneshot::channel();
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 91},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let unsubscribe = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        unsubscribe_tx
+            .send(serde_json::from_str::<serde_json::Value>(&unsubscribe).unwrap())
+            .unwrap();
+        let _ = socket.next().await;
+    });
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let connection = Connection::with_server(TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    ))
+    .await;
+
+    let started = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"service": "iex", "symbols": ["AAPL"]}),
+            )),
+        )
+        .await
+        .unwrap();
+    let started = success_data("start_market_data_subscription", &started);
+    let subscription_id = started["id"].as_str().unwrap();
+
+    let poll = cancellable_tool_request(
+        &connection,
+        "poll_market_data_subscription",
+        serde_json::json!({"subscription_id": subscription_id}),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    poll.cancel(Some("caller stopped waiting".into()))
+        .await
+        .unwrap();
+    let still_active = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("poll_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "max_wait_ms": 0
+                }),
+            )),
+        )
+        .await
+        .unwrap();
+    let still_active = success_data("poll_market_data_subscription", &still_active);
+    assert_eq!(still_active["state"], "active");
+
+    let stop = cancellable_tool_request(
+        &connection,
+        "stop_market_data_subscription",
+        serde_json::json!({"subscription_id": subscription_id}),
+    )
+    .await;
+    stop.cancel(Some("caller discarded stop response".into()))
+        .await
+        .unwrap();
+    let unsubscribe = tokio::time::timeout(Duration::from_millis(500), unsubscribe_rx)
+        .await
+        .expect("cancelled stop response prevented worker cleanup")
+        .unwrap();
+    assert_eq!(
+        unsubscribe,
+        serde_json::json!({
+            "eventName": "unsubscribe",
+            "authorization": "mcp-ws-secret",
+            "eventData": {"subscriptionId": 91, "tickers": ["AAPL"]}
+        })
+    );
+    let stopped = registry.stop(subscription_id).await.unwrap();
+    assert_eq!(serde_json::to_value(stopped).unwrap()["state"], "stopped");
+
+    websocket.await.unwrap();
+    registry.shutdown().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn mcp_poll_enforces_and_honors_caller_selected_bounds() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 92},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "A",
+                    "service": "iex",
+                    "data": ["2026-08-25T14:00:00Z", "AAPL", 101.0]
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        let _ = socket.next().await;
+        let _ = socket.next().await;
+    });
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let connection = Connection::with_server(TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    ))
+    .await;
+    let started = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"service": "iex", "symbols": ["AAPL"]}),
+            )),
+        )
+        .await
+        .unwrap();
+    let started = success_data("start_market_data_subscription", &started);
+    let subscription_id = started["id"].as_str().unwrap();
+
+    for invalid in [
+        serde_json::json!({
+            "subscription_id": subscription_id,
+            "limit": 257,
+            "max_wait_ms": 0
+        }),
+        serde_json::json!({
+            "subscription_id": subscription_id,
+            "limit": 1,
+            "max_wait_ms": 5001
+        }),
+    ] {
+        let result = connection
+            .client
+            .call_tool(
+                CallToolRequestParams::new("poll_market_data_subscription")
+                    .with_arguments(arguments(invalid)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let payload =
+            serde_json::from_str::<serde_json::Value>(&result.content[0].as_text().unwrap().text)
+                .unwrap();
+        assert_eq!(payload["kind"], "validation");
+        assert_eq!(
+            result.structured_content.as_ref().unwrap()["error"],
+            payload
+        );
+    }
+
+    let started_at = Instant::now();
+    let empty = tokio::time::timeout(
+        Duration::from_millis(250),
+        connection.client.call_tool(
+            CallToolRequestParams::new("poll_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "after_sequence": u64::MAX,
+                    "limit": 1,
+                    "max_wait_ms": 20
+                }),
+            )),
+        ),
+    )
+    .await
+    .expect("caller-selected 20 ms poll wait was not honored")
+    .unwrap();
+    assert!(started_at.elapsed() < Duration::from_millis(250));
+    let empty = success_data("poll_market_data_subscription", &empty);
+    assert_eq!(empty["events"], serde_json::json!([]));
+    assert_eq!(empty["state"], "active");
+
+    let stopped = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("stop_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"subscription_id": subscription_id}),
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stopped.is_error, Some(false));
+    websocket.await.unwrap();
+    registry.shutdown().await;
     connection.close().await;
 }
 

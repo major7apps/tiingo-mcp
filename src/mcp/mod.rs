@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::client::TiingoClient;
+use crate::{client::TiingoClient, config::Config, websocket::registry::MarketDataRegistry};
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
@@ -26,19 +26,28 @@ pub(crate) fn compatibility_descriptor_meta() -> MetaObject {
 #[derive(Clone, Debug)]
 pub struct TiingoServer {
     pub(crate) client: Arc<TiingoClient>,
+    pub(crate) market_data: MarketDataRegistry,
     pub(crate) tool_router: ToolRouter<Self>,
 }
 
 impl TiingoServer {
     pub fn with_client(client: TiingoClient) -> Self {
+        Self::with_client_and_registry(client, MarketDataRegistry::new(None))
+    }
+
+    pub fn with_client_and_registry(client: TiingoClient, market_data: MarketDataRegistry) -> Self {
         Self {
             client: Arc::new(client),
+            market_data,
             tool_router: tools::tool_router(),
         }
     }
 
     pub fn from_env() -> anyhow::Result<Self> {
-        Ok(Self::with_client(TiingoClient::from_env()?))
+        let config = Config::from_env()?;
+        let market_data = MarketDataRegistry::new(config.api_key.clone());
+        let client = TiingoClient::new(config)?;
+        Ok(Self::with_client_and_registry(client, market_data))
     }
 }
 

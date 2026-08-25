@@ -1,4 +1,7 @@
-use std::{future::Future, time::Instant};
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 
 use chrono::NaiveDate;
 use serde_json::Value;
@@ -8,6 +11,10 @@ use tiingo_mcp::{
         query::{DateRange, IntradayResample, NewsQuery},
     },
     error::TiingoError,
+    websocket::{
+        protocol::Service,
+        registry::{MarketDataRegistry, StartRequest, SubscriptionStatus},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +215,99 @@ fn require_live_api_key() -> anyhow::Result<()> {
             .is_some(),
         "TIINGO_API_KEY must be set to a non-empty value when an ignored live smoke is selected"
     );
+    Ok(())
+}
+
+async fn live_market_data_lifecycle(
+    capability: &str,
+    service: Service,
+) -> anyhow::Result<LiveOutcome> {
+    require_live_api_key()?;
+    let api_key = std::env::var("TIINGO_API_KEY")?;
+    let registry = MarketDataRegistry::new(Some(api_key));
+    let started_at = Instant::now();
+    let start = tokio::time::timeout(
+        Duration::from_secs(10),
+        registry.start(StartRequest {
+            service,
+            symbols: vec!["AAPL".to_owned()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        }),
+    )
+    .await;
+    let start_latency = started_at.elapsed();
+    let subscription_id = match start {
+        Ok(Ok(result)) => {
+            anyhow::ensure!(result.state == SubscriptionStatus::Active);
+            result.id
+        }
+        Ok(Err(TiingoError::Entitlement { .. })) => {
+            registry.shutdown().await;
+            println!("LIVE {capability}: entitlement (HTTP 403)");
+            return Ok(LiveOutcome::Entitlement);
+        }
+        Ok(Err(error)) => {
+            registry.shutdown().await;
+            return Err(anyhow::anyhow!("LIVE {capability}: {error}"));
+        }
+        Err(error) => {
+            registry.shutdown().await;
+            return Err(anyhow::anyhow!(
+                "LIVE {capability}: initial acknowledgement exceeded the finite timeout: {error}"
+            ));
+        }
+    };
+
+    let poll_started_at = Instant::now();
+    let poll = tokio::time::timeout(
+        Duration::from_secs(6),
+        registry.poll_with_bounds(&subscription_id, 0, 1, Duration::from_secs(5)),
+    )
+    .await;
+    let poll_latency = poll_started_at.elapsed();
+
+    let stop_started_at = Instant::now();
+    let stop = tokio::time::timeout(Duration::from_secs(6), registry.stop(&subscription_id)).await;
+    let stop_latency = stop_started_at.elapsed();
+    registry.shutdown().await;
+
+    let poll = poll
+        .map_err(|error| anyhow::anyhow!("LIVE {capability}: poll timed out: {error}"))?
+        .map_err(|error| anyhow::anyhow!("LIVE {capability}: {error}"))?;
+    anyhow::ensure!(poll.events.len() <= 1);
+    if let Some(event) = poll.events.first() {
+        anyhow::ensure!(
+            matches!(
+                event.payload.get("messageType").and_then(Value::as_str),
+                Some("A" | "H")
+            ),
+            "LIVE {capability}: bounded poll returned an unexpected message type"
+        );
+    }
+    stop.map_err(|error| anyhow::anyhow!("LIVE {capability}: stop timed out: {error}"))?
+        .map_err(|error| anyhow::anyhow!("LIVE {capability}: stop failed: {error}"))?;
+
+    let mut latencies = [start_latency, poll_latency, stop_latency];
+    latencies.sort_unstable();
+    println!(
+        "LIVE {capability}: latency min={:?}, median={:?}, p95={:?}, samples=3",
+        latencies[0], latencies[1], latencies[2]
+    );
+    Ok(LiveOutcome::Success)
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY and consumes one bounded IEX WebSocket subscription"]
+async fn live_iex_level_six_single_ticker_websocket() -> anyhow::Result<()> {
+    live_market_data_lifecycle("IEX level-6 WebSocket", Service::Iex).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, a documented consolidated session, and consumes one bounded WebSocket subscription"]
+async fn live_consolidated_level_six_single_ticker_websocket() -> anyhow::Result<()> {
+    live_market_data_lifecycle("consolidated level-6 WebSocket", Service::Consolidated).await?;
     Ok(())
 }
 
