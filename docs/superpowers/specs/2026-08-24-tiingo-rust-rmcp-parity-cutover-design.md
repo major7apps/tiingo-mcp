@@ -240,7 +240,7 @@ Rust must improve cold start and resident memory and must not regress local wrap
 
 The cutover is released as `2.0.0` because it intentionally removes the PyPI/`uvx` install contract and corrects error semantics.
 
-Release automation builds `tiingo-mcp` for Apple Silicon and Intel macOS, x86-64 and ARM64 Linux, and x86-64 Windows. Linux artifacts use Rustls and a portable static target where dependencies permit it. Tagged GitHub releases contain archives, SHA-256 checksums, and immutable source references. `cargo install tiingo-mcp` is supported after the crate name and publishing route are verified; GitHub binaries remain the runtime-independent distribution.
+Release automation builds `tiingo-mcp` for Apple Silicon and Intel macOS, x86-64 and ARM64 Linux, and x86-64 Windows. Linux artifacts use Rustls and a portable static target where dependencies permit it. Tagged GitHub releases contain archives, SHA-256 checksums, and immutable source references. Version `2.0.0` is published on crates.io, so `cargo install tiingo-mcp --locked` is supported; GitHub binaries remain the runtime-independent distribution.
 
 Two MCP-facing installation paths are documented:
 

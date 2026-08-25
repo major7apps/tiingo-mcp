@@ -596,6 +596,21 @@ mod tests {
         ))
     }
 
+    #[test]
+    fn descendant_pid_reader_waits_for_the_file() {
+        let pid_file = pid_file("delayed-reader");
+        let writer_path = pid_file.clone();
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            fs::write(writer_path, std::process::id().to_string()).unwrap();
+        });
+
+        let pid = wait_for_descendant_pid(&pid_file, Instant::now() + Duration::from_millis(200));
+
+        writer.join().unwrap();
+        assert_eq!(pid, Pid::from(std::process::id() as usize));
+    }
+
     fn read_descendant_pid(path: &Path) -> Pid {
         let pid = fs::read_to_string(path)
             .unwrap()
@@ -604,6 +619,22 @@ mod tests {
             .unwrap();
         fs::remove_file(path).unwrap();
         Pid::from(pid)
+    }
+
+    fn wait_for_descendant_pid(path: &Path, deadline: Instant) -> Pid {
+        loop {
+            if let Ok(contents) = fs::read_to_string(path)
+                && let Ok(pid) = contents.trim().parse::<usize>()
+            {
+                fs::remove_file(path).unwrap();
+                return Pid::from(pid);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "descendant PID file was not written"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn assert_process_is_gone(pid: Pid) {
@@ -793,6 +824,7 @@ mod tests {
         let root = Pid::from(child.id() as usize);
         let mut system = System::new();
         let deadline = Instant::now() + Duration::from_secs(1);
+        let descendant = wait_for_descendant_pid(&pid_file, deadline);
         let root_rss = loop {
             let mut process_tree = HashSet::from([root]);
             refresh_process_tree(&mut system, root, &mut process_tree);
@@ -806,7 +838,6 @@ mod tests {
         let aggregate_rss = process_tree_rss_bytes(&mut system, &child).unwrap();
         drop(child.stdin.take());
         let cleanup = cleanup_process_tree(&mut child, Duration::from_millis(200)).unwrap();
-        let descendant = read_descendant_pid(&pid_file);
 
         assert!(
             aggregate_rss > root_rss,

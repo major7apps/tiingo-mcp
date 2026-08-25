@@ -164,7 +164,7 @@ cd tiingo-mcp
 
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets
+cargo test --all-targets --locked
 cargo build --release --locked
 cargo deny check
 ```
