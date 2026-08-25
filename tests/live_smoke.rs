@@ -212,7 +212,7 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
     )
     .await?;
     classify(
-        "filtered crypto prices",
+        "filtered crypto quote",
         ResponseShape::CryptoQuote { ticker: "btcusd" },
         client.get_crypto_quote(Some("btcusd")),
     )

@@ -153,11 +153,7 @@ jobs:
         shell: bash
         run: |
           for target in ${{ join(matrix.targets, ' ') }}; do
-            executable="tiingo-mcp"
-            if [[ "$target" == "x86_64-pc-windows-msvc" ]]; then
-              executable="tiingo-mcp.exe"
-            fi
-            bash packaging/mcpb/package.sh "$target" "target/$target/release/$executable"
+            bash packaging/mcpb/package.sh "$target" "target/$target/dist"
           done
       - name: Attest
         uses: actions/attest@v4

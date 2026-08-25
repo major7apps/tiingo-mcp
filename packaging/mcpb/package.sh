@@ -2,12 +2,12 @@
 set -euo pipefail
 
 if [[ "$#" -ne 2 ]]; then
-  echo "usage: $0 <target-triple> <binary-path>" >&2
+  echo "usage: $0 <target-triple> <binary-directory>" >&2
   exit 64
 fi
 
 target="$1"
-binary="$2"
+binary_directory="$2"
 case "$target" in
   aarch64-apple-darwin|x86_64-apple-darwin)
     platform="darwin"; executable="tiingo-mcp" ;;
@@ -17,6 +17,7 @@ case "$target" in
     platform="win32"; executable="tiingo-mcp.exe" ;;
   *) echo "unsupported target: $target" >&2; exit 65 ;;
 esac
+binary="$binary_directory/$executable"
 
 if [[ ! -f "$binary" ]]; then
   echo "binary not found: $binary" >&2

@@ -50,6 +50,32 @@ impl IntradayResample {
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub enum IexResample {
+    #[serde(rename = "1min")]
+    OneMinute,
+    #[serde(rename = "5min")]
+    FiveMinutes,
+    #[serde(rename = "15min")]
+    FifteenMinutes,
+    #[serde(rename = "30min")]
+    ThirtyMinutes,
+    #[serde(rename = "1hour")]
+    OneHour,
+}
+
+impl IexResample {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OneMinute => "1min",
+            Self::FiveMinutes => "5min",
+            Self::FifteenMinutes => "15min",
+            Self::ThirtyMinutes => "30min",
+            Self::OneHour => "1hour",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub enum NewsSort {
     #[serde(rename = "crawlDate")]
     CrawlDate,

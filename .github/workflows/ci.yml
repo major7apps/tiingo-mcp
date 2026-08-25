@@ -21,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@master
@@ -83,6 +85,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust 1.88.0
         uses: dtolnay/rust-toolchain@master
@@ -119,12 +123,14 @@ jobs:
 
       - name: Build MCPB 0.3 bundle
         shell: bash
-        run: bash packaging/mcpb/package.sh ${{ matrix.target }} target/${{ matrix.target }}/release/${{ matrix.executable }}
+        run: bash packaging/mcpb/package.sh ${{ matrix.target }} target/${{ matrix.target }}/release
 
       - name: Validate staged MCPB manifest with CLI 2.1.2
         shell: bash
         run: |
           test "$(jq -r '.server.entry_point' target/mcpb/${{ matrix.target }}/manifest.json)" = "server/${{ matrix.executable }}"
+          crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tiingo-mcp") | .version')"
+          test "$(jq -r '.version' target/mcpb/${{ matrix.target }}/manifest.json)" = "$crate_version"
           npx --yes @anthropic-ai/mcpb@2.1.2 validate target/mcpb/${{ matrix.target }}/manifest.json
 
       - name: Inspect MCPB archive with CLI 2.1.2

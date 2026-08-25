@@ -222,7 +222,7 @@ async fn upstream_error_payload_and_display_never_expose_credentials() {
     Mock::given(method("GET"))
         .respond_with(
             ResponseTemplate::new(500)
-                .set_body_string("key=test-key\\nAuthorization: Token test-key"),
+                .set_body_string("key=test-key\nAuthorization: Token test-key"),
         )
         .mount(&server)
         .await;
@@ -242,6 +242,7 @@ async fn upstream_error_payload_and_display_never_expose_credentials() {
     assert!(!error.to_string().contains("Token test-key"));
     assert!(!payload.message.contains("test-key"));
     assert!(!payload.message.contains("Token test-key"));
+    assert!(!payload.message.contains("Authorization:"));
 }
 
 #[tokio::test]

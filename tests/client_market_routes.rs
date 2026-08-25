@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use tiingo_mcp::{
     client::{
         TiingoClient,
-        query::{DateRange, EodResample, IntradayResample},
+        query::{DateRange, EodResample, IexResample, IntradayResample},
     },
     config::{Config, RetryPolicy},
     error::TiingoError,
@@ -111,11 +111,7 @@ async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
     );
     assert_eq!(
         client
-            .get_intraday_prices(
-                "AAPL",
-                populated_range(),
-                Some(IntradayResample::FiveMinutes),
-            )
+            .get_intraday_prices("AAPL", populated_range(), Some(IexResample::FiveMinutes))
             .await
             .unwrap(),
         serde_json::json!({"route": "intraday"})

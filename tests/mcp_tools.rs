@@ -8,7 +8,7 @@ use rmcp::{
 use tiingo_mcp::{
     client::TiingoClient,
     config::{Config, RetryPolicy},
-    mcp::TiingoServer,
+    mcp::{TiingoServer, tools::IntradayPricesArgs},
 };
 use url::Url;
 use wiremock::{
@@ -35,6 +35,17 @@ const TOOL_NAMES: [&str; 17] = [
     "get_dividend_yield",
     "get_splits",
 ];
+
+#[test]
+fn intraday_prices_rejects_daily_resample() {
+    let error = serde_json::from_value::<IntradayPricesArgs>(serde_json::json!({
+        "ticker": "AAPL",
+        "resample_freq": "1day"
+    }))
+    .unwrap_err();
+
+    assert!(error.to_string().contains("unknown variant"));
+}
 
 fn test_client(server: &MockServer, api_key: &str) -> TiingoClient {
     TiingoClient::new(Config {
@@ -417,6 +428,15 @@ async fn returns_sanitized_structured_authentication_errors() {
         .unwrap();
 
     assert_eq!(result.is_error, Some(true));
+    let text = result.content[0]
+        .as_text()
+        .expect("recoverable errors retain a JSON text block");
+    let text_payload = serde_json::from_str::<serde_json::Value>(&text.text).unwrap();
+    assert_eq!(text_payload["kind"], "authentication");
+    assert_eq!(
+        text_payload,
+        result.structured_content.as_ref().unwrap()["error"]
+    );
     assert_eq!(
         result.structured_content.as_ref().unwrap()["error"]["kind"],
         "authentication"

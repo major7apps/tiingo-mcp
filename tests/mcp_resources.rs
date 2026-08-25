@@ -117,8 +117,12 @@ async fn advertises_and_reads_corrected_legacy_resources() {
     };
     assert_eq!(mime_type.as_deref(), Some("application/json"));
     let capabilities = json_text(&capabilities);
-    assert_eq!(capabilities["server_version"], "2.0.0");
-    assert_eq!(capabilities["tool_count"], 17);
+    let tools = connection.client.list_tools(None).await.unwrap().tools;
+    assert_eq!(capabilities["server_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        capabilities["tool_count"].as_u64(),
+        Some(tools.len() as u64)
+    );
     assert_eq!(capabilities["as_of"], "2026-08-24");
     assert_eq!(
         capabilities["official_sources"],

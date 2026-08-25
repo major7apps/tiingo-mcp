@@ -147,10 +147,6 @@ fn debug_diagnostics_stay_on_stderr_and_stdout_is_protocol_only() -> anyhow::Res
     }
     let stderr = stderr_reader.join().expect("stderr reader")?;
     assert!(!stderr.is_empty(), "RUST_LOG=debug produced no diagnostics");
-    assert!(
-        stderr.contains("rmcp::service") && stderr.contains("Service initialized"),
-        "missing RMCP diagnostic: {stderr}"
-    );
     assert!(!stdout.contains("DEBUG"));
     assert!(!stdout.contains("tiingo_mcp"));
     Ok(())

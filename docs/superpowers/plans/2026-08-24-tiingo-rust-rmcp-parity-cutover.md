@@ -2501,18 +2501,19 @@ Create `packaging/mcpb/package.sh`:
 set -euo pipefail
 
 if [[ "$#" -ne 2 ]]; then
-  echo "usage: $0 <target-triple> <binary-path>" >&2
+  echo "usage: $0 <target-triple> <binary-directory>" >&2
   exit 64
 fi
 
 target="$1"
-binary="$2"
+binary_directory="$2"
 case "$target" in
   *-apple-darwin) platform="darwin"; executable="tiingo-mcp" ;;
   *-unknown-linux-*) platform="linux"; executable="tiingo-mcp" ;;
   *-pc-windows-*) platform="win32"; executable="tiingo-mcp.exe" ;;
   *) echo "unsupported target: $target" >&2; exit 65 ;;
 esac
+binary="$binary_directory/$executable"
 
 if [[ ! -f "$binary" ]]; then
   echo "binary not found: $binary" >&2
@@ -2540,7 +2541,7 @@ Run on the current host target:
 
 ```bash
 cargo build --release --locked
-bash packaging/mcpb/package.sh aarch64-apple-darwin target/release/tiingo-mcp
+bash packaging/mcpb/package.sh aarch64-apple-darwin target/release
 npx --yes @anthropic-ai/mcpb@2.1.2 validate target/distrib/tiingo-mcp-aarch64-apple-darwin.mcpb
 dist plan
 ```

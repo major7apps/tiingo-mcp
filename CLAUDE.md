@@ -17,10 +17,10 @@ dist plan
 
 The test suite binds local mock HTTP servers. The ignored live-smoke test consumes quota and must be invoked deliberately with `TIINGO_API_KEY`.
 
-To build an MCPB bundle from an existing target binary:
+To build an MCPB bundle from an existing target binary directory:
 
 ```bash
-bash packaging/mcpb/package.sh <target-triple> <binary-path>
+bash packaging/mcpb/package.sh <target-triple> <binary-directory>
 ```
 
 ## Architecture

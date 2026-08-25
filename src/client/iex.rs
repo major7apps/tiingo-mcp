@@ -1,6 +1,6 @@
 use super::{
     TiingoClient,
-    query::{DateRange, IntradayResample, validate_path_segment},
+    query::{DateRange, IexResample, validate_path_segment},
 };
 use crate::error::TiingoError;
 
@@ -22,7 +22,7 @@ impl TiingoClient {
         &self,
         ticker: &str,
         range: DateRange,
-        resample: Option<IntradayResample>,
+        resample: Option<IexResample>,
     ) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         let mut query = Vec::new();

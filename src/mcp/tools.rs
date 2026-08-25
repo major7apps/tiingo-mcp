@@ -1,5 +1,5 @@
 use crate::{
-    client::query::{DateRange, EodResample, IntradayResample, NewsQuery, NewsSort},
+    client::query::{DateRange, EodResample, IexResample, IntradayResample, NewsQuery, NewsSort},
     error::TiingoError,
 };
 use rmcp::{
@@ -51,7 +51,7 @@ pub struct IntradayPricesArgs {
     pub end_date: Option<chrono::NaiveDate>,
     #[serde(default)]
     #[schemars(with = "Option<String>")]
-    pub resample_freq: Option<IntradayResample>,
+    pub resample_freq: Option<IexResample>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]

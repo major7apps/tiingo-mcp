@@ -67,6 +67,7 @@ fn percentile_index(length: usize, percentile: f64) -> usize {
 }
 
 fn median_f64(sorted: &[f64]) -> f64 {
+    assert!(!sorted.is_empty(), "median requires at least one sample");
     let upper = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {
         (sorted[upper - 1] + sorted[upper]) / 2.0
@@ -76,6 +77,7 @@ fn median_f64(sorted: &[f64]) -> f64 {
 }
 
 fn median_u64(sorted: &[u64]) -> u64 {
+    assert!(!sorted.is_empty(), "median requires at least one sample");
     let upper = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {
         ((u128::from(sorted[upper - 1]) + u128::from(sorted[upper])) / 2) as u64
@@ -569,6 +571,18 @@ mod tests {
     fn medians_average_the_two_middle_values_for_even_samples() {
         assert_eq!(median_f64(&[1.0, 3.0]), 2.0);
         assert_eq!(median_u64(&[1, 3]), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "median requires at least one sample")]
+    fn floating_point_median_rejects_an_empty_sample() {
+        median_f64(&[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "median requires at least one sample")]
+    fn integer_median_rejects_an_empty_sample() {
+        median_u64(&[]);
     }
 
     fn pid_file(name: &str) -> PathBuf {
