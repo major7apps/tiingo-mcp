@@ -1,5 +1,9 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
+use anyhow::Context;
 use rmcp::{
     RoleClient, ServiceExt,
     model::{CallToolRequestParams, JsonObject},
@@ -13,7 +17,7 @@ use tiingo_mcp::{
 use url::Url;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
+    matchers::{method, path, query_param},
 };
 
 const TOOL_NAMES: [&str; 17] = [
@@ -86,6 +90,246 @@ impl Connection {
 
 fn arguments(value: serde_json::Value) -> JsonObject {
     value.as_object().unwrap().clone()
+}
+
+fn assert_accurate_success(
+    tool_name: &str,
+    result: &rmcp::model::CallToolResult,
+    expected: &serde_json::Value,
+) {
+    assert_eq!(
+        result.is_error,
+        Some(false),
+        "{tool_name} returned an error"
+    );
+    let text = &result.content[0]
+        .as_text()
+        .expect("successful tools retain a JSON text block")
+        .text;
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(text).unwrap(),
+        *expected,
+        "{tool_name} changed the upstream JSON text payload"
+    );
+    assert_eq!(
+        result.structured_content,
+        Some(serde_json::json!({
+            "data": expected,
+            "meta": {"source": "tiingo"}
+        })),
+        "{tool_name} changed the structured payload"
+    );
+}
+
+struct ToolCase {
+    name: &'static str,
+    route: &'static str,
+    arguments: serde_json::Value,
+    response: serde_json::Value,
+    query: &'static [(&'static str, &'static str)],
+}
+
+fn all_tool_cases() -> Vec<ToolCase> {
+    vec![
+        ToolCase {
+            name: "get_stock_metadata",
+            route: "/tiingo/daily/AAPL",
+            arguments: serde_json::json!({"ticker": "AAPL"}),
+            response: serde_json::json!({"ticker": "AAPL", "name": "Apple Inc."}),
+            query: &[],
+        },
+        ToolCase {
+            name: "get_stock_prices",
+            route: "/tiingo/daily/AAPL/prices",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "weekly"
+            }),
+            response: serde_json::json!([{"date": "2024-01-05", "close": 185.92}]),
+            query: &[
+                ("endDate", "2024-01-31"),
+                ("resampleFreq", "weekly"),
+                ("startDate", "2024-01-01"),
+            ],
+        },
+        ToolCase {
+            name: "get_realtime_price",
+            route: "/iex/AAPL",
+            arguments: serde_json::json!({"ticker": "AAPL", "after_hours": true}),
+            response: serde_json::json!([{"ticker": "AAPL", "tngoLast": 227.16}]),
+            query: &[("afterHours", "true")],
+        },
+        ToolCase {
+            name: "get_intraday_prices",
+            route: "/iex/AAPL/prices",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "5min"
+            }),
+            response: serde_json::json!([{"date": "2024-01-02T14:30:00Z", "close": 185.12}]),
+            query: &[
+                ("endDate", "2024-01-31"),
+                ("resampleFreq", "5min"),
+                ("startDate", "2024-01-01"),
+            ],
+        },
+        ToolCase {
+            name: "get_forex_quote",
+            route: "/tiingo/fx/eurusd/top",
+            arguments: serde_json::json!({"ticker": "eurusd"}),
+            response: serde_json::json!([{"ticker": "eurusd", "midPrice": 1.0812}]),
+            query: &[],
+        },
+        ToolCase {
+            name: "get_forex_prices",
+            route: "/tiingo/fx/eurusd/prices",
+            arguments: serde_json::json!({
+                "ticker": "eurusd",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "1day"
+            }),
+            response: serde_json::json!([{"date": "2024-01-02", "close": 1.0942}]),
+            query: &[
+                ("endDate", "2024-01-31"),
+                ("resampleFreq", "1day"),
+                ("startDate", "2024-01-01"),
+            ],
+        },
+        ToolCase {
+            name: "get_crypto_quote",
+            route: "/tiingo/crypto/prices",
+            arguments: serde_json::json!({"tickers": "btcusd"}),
+            response: serde_json::json!([{"ticker": "btcusd", "priceData": [{"close": 64000.25}]}]),
+            query: &[("tickers", "btcusd")],
+        },
+        ToolCase {
+            name: "get_crypto_prices",
+            route: "/tiingo/crypto/prices",
+            arguments: serde_json::json!({
+                "tickers": "btcusd,ethusd",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "1hour"
+            }),
+            response: serde_json::json!([{"ticker": "btcusd", "priceData": [{"close": 64000.25}]}]),
+            query: &[
+                ("endDate", "2024-01-31"),
+                ("resampleFreq", "1hour"),
+                ("startDate", "2024-01-01"),
+                ("tickers", "btcusd,ethusd"),
+            ],
+        },
+        ToolCase {
+            name: "get_crypto_metadata",
+            route: "/tiingo/crypto",
+            arguments: serde_json::json!({"tickers": "btcusd"}),
+            response: serde_json::json!([{"ticker": "btcusd", "baseCurrency": "btc"}]),
+            query: &[("tickers", "btcusd")],
+        },
+        ToolCase {
+            name: "get_news",
+            route: "/tiingo/news",
+            arguments: serde_json::json!({
+                "tickers": "AAPL",
+                "tags": "earnings",
+                "source": "reuters",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "limit": 2,
+                "offset": 1,
+                "sort_by": "publishedDate"
+            }),
+            response: serde_json::json!([{
+                "id": 42,
+                "title": "Apple reports results",
+                "publishedDate": "2024-01-25T21:00:00Z"
+            }]),
+            query: &[
+                ("endDate", "2024-01-31"),
+                ("limit", "2"),
+                ("offset", "1"),
+                ("sortBy", "publishedDate"),
+                ("source", "reuters"),
+                ("startDate", "2024-01-01"),
+                ("tags", "earnings"),
+                ("tickers", "AAPL"),
+            ],
+        },
+        ToolCase {
+            name: "get_fundamentals_definitions",
+            route: "/tiingo/fundamentals/definitions",
+            arguments: serde_json::json!({}),
+            response: serde_json::json!([{"dataCode": "revenue", "description": "Total revenue"}]),
+            query: &[],
+        },
+        ToolCase {
+            name: "get_financial_statements",
+            route: "/tiingo/fundamentals/AAPL/statements",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31"
+            }),
+            response: serde_json::json!([{"date": "2024-01-31", "quarter": 1}]),
+            query: &[("endDate", "2024-01-31"), ("startDate", "2024-01-01")],
+        },
+        ToolCase {
+            name: "get_daily_fundamentals",
+            route: "/tiingo/fundamentals/AAPL/daily",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31"
+            }),
+            response: serde_json::json!([{"date": "2024-01-31", "marketCap": 2900000000000_i64}]),
+            query: &[("endDate", "2024-01-31"), ("startDate", "2024-01-01")],
+        },
+        ToolCase {
+            name: "get_company_meta",
+            route: "/tiingo/fundamentals/meta",
+            arguments: serde_json::json!({"tickers": "AAPL,MSFT"}),
+            response: serde_json::json!([{"ticker": "AAPL", "sector": "Technology"}]),
+            query: &[("tickers", "AAPL,MSFT")],
+        },
+        ToolCase {
+            name: "get_dividends",
+            route: "/tiingo/corporate-actions/AAPL/distributions",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31"
+            }),
+            response: serde_json::json!([{"ticker": "AAPL", "exDate": "2024-01-01", "distribution": 0.24}]),
+            query: &[("endExDate", "2024-01-31"), ("startExDate", "2024-01-01")],
+        },
+        ToolCase {
+            name: "get_dividend_yield",
+            route: "/tiingo/corporate-actions/AAPL/distribution-yield",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31"
+            }),
+            response: serde_json::json!([{"date": "2024-01-31", "trailing12MoYield": 0.005}]),
+            query: &[("endDate", "2024-01-31"), ("startDate", "2024-01-01")],
+        },
+        ToolCase {
+            name: "get_splits",
+            route: "/tiingo/corporate-actions/AAPL/splits",
+            arguments: serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31"
+            }),
+            response: serde_json::json!([{"ticker": "AAPL", "exDate": "2024-01-15", "splitFactor": 2.0}]),
+            query: &[("endExDate", "2024-01-31"), ("startExDate", "2024-01-01")],
+        },
+    ]
 }
 
 struct ExpectedToolSchema {
@@ -476,4 +720,196 @@ async fn rejects_negative_news_pagination_before_contacting_tiingo() {
 
     assert!(upstream.received_requests().await.unwrap().is_empty());
     connection.close().await;
+}
+
+#[tokio::test]
+async fn every_tool_preserves_data_and_forwards_exact_arguments() {
+    let upstream = MockServer::start().await;
+    let cases = all_tool_cases();
+
+    for case in &cases {
+        let mut mock = Mock::given(method("GET")).and(path(case.route));
+        if case.name == "get_crypto_quote" {
+            mock = mock.and(query_param("tickers", "btcusd"));
+        } else if case.name == "get_crypto_prices" {
+            mock = mock.and(query_param("tickers", "btcusd,ethusd"));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(case.response.clone()))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+    }
+
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+    for (index, case) in cases.iter().enumerate() {
+        let result = connection
+            .client
+            .call_tool(
+                CallToolRequestParams::new(case.name)
+                    .with_arguments(arguments(case.arguments.clone())),
+            )
+            .await
+            .unwrap();
+        assert_accurate_success(case.name, &result, &case.response);
+
+        let requests = upstream.received_requests().await.unwrap();
+        assert_eq!(
+            requests.len(),
+            index + 1,
+            "{} made an unexpected number of upstream requests",
+            case.name
+        );
+        let request = requests.last().unwrap();
+        assert_eq!(
+            request.url.path(),
+            case.route,
+            "{} used the wrong route",
+            case.name
+        );
+        let mut query = request
+            .url
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        query.sort_unstable();
+        let mut expected_query = case
+            .query
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect::<Vec<_>>();
+        expected_query.sort_unstable();
+        assert_eq!(query, expected_query, "{} changed its query", case.name);
+    }
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn repeated_eod_calls_are_consistent_accurate_and_fast() {
+    const SAMPLES: usize = 30;
+    const P95_LIMIT: Duration = Duration::from_millis(250);
+
+    let upstream = MockServer::start().await;
+    let documented_eod_shape = serde_json::json!([{
+        "date": "2026-08-24T00:00:00.000Z",
+        "open": 227.15,
+        "high": 229.89,
+        "low": 224.42,
+        "close": 227.16,
+        "volume": 34567890,
+        "adjOpen": 226.89,
+        "adjHigh": 229.63,
+        "adjLow": 224.16,
+        "adjClose": 226.90,
+        "adjVolume": 34567890,
+        "divCash": 0.26,
+        "splitFactor": 1.0
+    }]);
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/AAPL/prices"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(documented_eod_shape.clone()))
+        .expect((SAMPLES + 1) as u64)
+        .mount(&upstream)
+        .await;
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+    let request = || {
+        CallToolRequestParams::new("get_stock_prices")
+            .with_arguments(arguments(serde_json::json!({"ticker": "AAPL"})))
+    };
+
+    let warmup = connection.client.call_tool(request()).await.unwrap();
+    assert_accurate_success("get_stock_prices", &warmup, &documented_eod_shape);
+
+    let mut latencies = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        let result = tokio::time::timeout(P95_LIMIT * 2, connection.client.call_tool(request()))
+            .await
+            .expect("an MCP tool call exceeded 500 ms")
+            .unwrap();
+        latencies.push(started.elapsed());
+        assert_accurate_success("get_stock_prices", &result, &documented_eod_shape);
+    }
+    latencies.sort_unstable();
+    let median = latencies[SAMPLES / 2];
+    let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
+    eprintln!("MCP EOD latency: median={median:?}, p95={p95:?}, samples={SAMPLES}");
+    assert!(
+        p95 < P95_LIMIT,
+        "MCP EOD p95 latency {p95:?} exceeded {P95_LIMIT:?}"
+    );
+
+    connection.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY and consumes one EOD request"]
+async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    anyhow::ensure!(config.api_key.is_some(), "TIINGO_API_KEY is required");
+    let connection = Connection::new(TiingoClient::new(config)?).await;
+    let request = CallToolRequestParams::new("get_stock_prices").with_arguments(arguments(
+        serde_json::json!({
+            "ticker": "AAPL",
+            "start_date": "2024-01-02",
+            "end_date": "2024-01-02"
+        }),
+    ));
+
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        connection.client.call_tool(request),
+    )
+    .await
+    .expect("live MCP EOD request exceeded 10 seconds")?;
+    let elapsed = started.elapsed();
+    anyhow::ensure!(
+        result.is_error == Some(false),
+        "live MCP EOD request failed"
+    );
+
+    let structured = result
+        .structured_content
+        .as_ref()
+        .context("live MCP response omitted structured content")?;
+    anyhow::ensure!(structured["meta"]["source"] == "tiingo");
+    let rows = structured["data"]
+        .as_array()
+        .context("live MCP EOD data was not an array")?;
+    anyhow::ensure!(!rows.is_empty(), "live MCP EOD response was empty");
+    for row in rows {
+        let open = row["open"].as_f64().context("open was not numeric")?;
+        let high = row["high"].as_f64().context("high was not numeric")?;
+        let low = row["low"].as_f64().context("low was not numeric")?;
+        let close = row["close"].as_f64().context("close was not numeric")?;
+        anyhow::ensure!(high >= open && high >= close && high >= low);
+        anyhow::ensure!(low <= open && low <= close && low <= high);
+        anyhow::ensure!(row["volume"].as_u64().is_some(), "volume was not unsigned");
+        for field in [
+            "date",
+            "adjOpen",
+            "adjHigh",
+            "adjLow",
+            "adjClose",
+            "adjVolume",
+            "divCash",
+            "splitFactor",
+        ] {
+            anyhow::ensure!(!row[field].is_null(), "{field} was missing");
+        }
+    }
+
+    let text = &result.content[0]
+        .as_text()
+        .context("live MCP response omitted JSON text")?
+        .text;
+    anyhow::ensure!(serde_json::from_str::<serde_json::Value>(text)? == structured["data"]);
+    eprintln!(
+        "live MCP EOD latency: {elapsed:?}, rows={}, ticker=AAPL, date=2024-01-02",
+        rows.len()
+    );
+
+    connection.close().await;
+    Ok(())
 }

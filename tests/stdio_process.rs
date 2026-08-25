@@ -2,7 +2,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     process::{Child, Command, Stdio},
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -43,7 +43,8 @@ fn wait_for_exit(child: &mut Child) -> std::io::Result<std::process::ExitStatus>
     ))
 }
 
-async fn initialize_discover_and_cancel() -> anyhow::Result<()> {
+async fn initialize_discover_and_cancel() -> anyhow::Result<Duration> {
+    let started = Instant::now();
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"));
     command.env_remove("TIINGO_API_KEY");
     let transport = rmcp::transport::TokioChildProcess::new(command)?;
@@ -77,14 +78,15 @@ async fn initialize_discover_and_cancel() -> anyhow::Result<()> {
     assert!(discovery.capabilities.resources.is_some());
     assert!(discovery.capabilities.prompts.is_some());
     client.cancel().await?;
-    Ok(())
+    Ok(started.elapsed())
 }
 
 #[tokio::test]
 async fn stdio_supports_v1_compatible_initialize_and_current_discover() -> anyhow::Result<()> {
-    tokio::time::timeout(Duration::from_secs(5), initialize_discover_and_cancel())
+    let elapsed = tokio::time::timeout(Duration::from_secs(5), initialize_discover_and_cancel())
         .await
         .context("stdio initialize/discover/cancel timed out")??;
+    eprintln!("stdio initialize/discover/cancel latency: {elapsed:?}");
     Ok(())
 }
 
