@@ -48,6 +48,8 @@ jobs:
 
       - name: Run offline tests on MSRV
         if: matrix.rust == '1.88.0'
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo test --all-targets --locked
 
       - name: Install coverage tooling
@@ -58,6 +60,8 @@ jobs:
 
       - name: Run offline tests with coverage
         if: matrix.rust == 'stable'
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo llvm-cov --all-targets --all-features --locked --fail-under-lines 93
 
       - name: Build release binary

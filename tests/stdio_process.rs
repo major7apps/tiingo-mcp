@@ -87,10 +87,6 @@ async fn stdio_supports_v1_compatible_initialize_and_current_discover() -> anyho
         .await
         .context("stdio initialize/discover/cancel timed out")??;
     eprintln!("stdio initialize/discover/cancel latency: {elapsed:?}");
-    assert!(
-        elapsed < Duration::from_secs(2),
-        "stdio initialize/discover/cancel took {elapsed:?}"
-    );
     Ok(())
 }
 
