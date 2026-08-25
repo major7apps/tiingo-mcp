@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.2 (2026-08-25)
+
+### Dependencies
+
+- Updated `actions/checkout` and `actions/upload-artifact` to their current major versions.
+- Updated `rand` from 0.9 to 0.10 and removed the superseded transitive dependency versions.
+
+### Testing
+
+- Raised overall line coverage from 84.79% to 93.25% and added a 93% stable-CI floor.
+- Added end-to-end route, query, text, and structured-response checks for all 17 MCP tools, bringing the MCP tool layer to 100% line coverage.
+- Added deterministic MCP consistency and latency checks plus an ignored, one-request live EOD accuracy check.
+- Enforced Cargo offline mode for the MSRV and stable test suites after dependency installation.
+
 ## 2.0.1 (2026-08-25)
 
 ### Maintenance
