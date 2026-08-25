@@ -81,7 +81,7 @@ async fn initialize_discover_and_cancel() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn stdio_supports_python_compatible_initialize_and_current_discover() -> anyhow::Result<()> {
+async fn stdio_supports_v1_compatible_initialize_and_current_discover() -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(5), initialize_discover_and_cancel())
         .await
         .context("stdio initialize/discover/cancel timed out")??;

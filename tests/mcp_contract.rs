@@ -18,14 +18,14 @@ use wiremock::{
     matchers::{method, path, query_param},
 };
 
-const PYTHON_CONTRACT: &str = include_str!("contract/baseline/python-mcp.json");
+const V1_CONTRACT: &str = include_str!("contract/baseline/v1-mcp.json");
 const CHILD_TIMEOUT: Duration = Duration::from_secs(5);
 const SOURCE_DATE: &str = "2026-08-24";
 const OFFICIAL_SOURCES: [&str; 2] = [
     "https://www.tiingo.com/documentation/general/overview",
     "https://api.tiingo.com/documentation/end-of-day",
 ];
-const PYTHON_INITIALIZE_INSTRUCTIONS: &str = "Financial data server powered by Tiingo. Provides real-time and historical stock prices, forex rates, crypto data, news, fundamentals, and corporate actions. All date parameters use YYYY-MM-DD format.";
+const V1_INITIALIZE_INSTRUCTIONS: &str = "Financial data server powered by Tiingo. Provides real-time and historical stock prices, forex rates, crypto data, news, fundamentals, and corporate actions. All date parameters use YYYY-MM-DD format.";
 const RUST_INITIALIZE_INSTRUCTIONS: &str =
     "Financial data server powered by Tiingo. Dates use YYYY-MM-DD.";
 
@@ -147,7 +147,7 @@ fn canonical_initialize(mut result: Value, expected: bool) -> Value {
         replace_exact(
             object,
             "instructions",
-            Value::String(PYTHON_INITIALIZE_INSTRUCTIONS.to_owned()),
+            Value::String(V1_INITIALIZE_INSTRUCTIONS.to_owned()),
             Value::String(RUST_INITIALIZE_INSTRUCTIONS.to_owned()),
         );
     }
@@ -171,7 +171,7 @@ fn structured_output_schema() -> Value {
     })
 }
 
-fn python_output_schema() -> Value {
+fn v1_output_schema() -> Value {
     serde_json::json!({
         "description": "Generic wrapper for non-object return types.",
         "properties": {"result": {"type": "string"}},
@@ -196,7 +196,7 @@ fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
             replace_exact(
                 tool.as_object_mut().unwrap(),
                 "outputSchema",
-                python_output_schema(),
+                v1_output_schema(),
                 structured_output_schema(),
             );
         }
@@ -491,7 +491,7 @@ fn prompt_requests() -> [(String, Map<String, Value>); 5] {
 }
 
 async fn child_process_contract() -> anyhow::Result<()> {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
+    let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
     assert_eq!(client.list_all_tools().await?.len(), 17);
@@ -601,8 +601,8 @@ async fn child_process_matches_the_frozen_contract_plus_exact_approved_deltas() 
 }
 
 #[test]
-fn frozen_python_rejected_current_discover_with_the_exact_legacy_error() -> anyhow::Result<()> {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
+fn frozen_v1_rejected_current_discover_with_the_exact_legacy_error() -> anyhow::Result<()> {
+    let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     assert_eq!(
         baseline["server_discover"],
         serde_json::json!({
@@ -618,7 +618,7 @@ fn frozen_python_rejected_current_discover_with_the_exact_legacy_error() -> anyh
 
 #[tokio::test]
 async fn approved_crypto_route_and_bounded_retry_delta_are_explicit() -> anyhow::Result<()> {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT)?;
+    let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     assert!(
         baseline["http_requests"]
             .as_array()
@@ -669,7 +669,7 @@ fn canonicalization_preserves_unapproved_metadata() {
 
 #[test]
 fn approved_resource_discovery_delta_rejects_mutated_frozen_source() {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+    let baseline: Value = serde_json::from_str(V1_CONTRACT).unwrap();
     let mut resources = baseline["resources"].as_array().unwrap().clone();
     resources[0]["mimeType"] = Value::String("application/json".to_owned());
     assert_transform_rejects("resource MIME type", move || {
@@ -700,7 +700,7 @@ fn approved_resource_discovery_delta_rejects_mutated_frozen_source() {
 
 #[test]
 fn approved_output_schema_delta_rejects_a_mutated_frozen_source() {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+    let baseline: Value = serde_json::from_str(V1_CONTRACT).unwrap();
     let mut tools = baseline["tools"].as_array().unwrap().clone();
     tools[0]["outputSchema"]["properties"]["result"]["type"] = Value::String("number".into());
 
@@ -728,7 +728,7 @@ fn assert_transform_rejects(label: &str, transform: impl FnOnce() + std::panic::
 
 #[test]
 fn every_approved_delta_rejects_mutated_frozen_values() {
-    let baseline: Value = serde_json::from_str(PYTHON_CONTRACT).unwrap();
+    let baseline: Value = serde_json::from_str(V1_CONTRACT).unwrap();
 
     let mut initialize = baseline["initialize"].clone();
     initialize["instructions"] = Value::String(RUST_INITIALIZE_INSTRUCTIONS.to_owned());
