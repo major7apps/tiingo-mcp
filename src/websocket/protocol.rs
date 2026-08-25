@@ -97,11 +97,15 @@ pub(crate) fn redact_bounded_secret(value: &str, secret: &str) -> String {
 }
 
 pub(crate) fn json_number_matches_u64(number: &Number, value: u64) -> bool {
-    number.as_u64() == Some(value)
-        || (value <= (1_u64 << f64::MANTISSA_DIGITS)
-            && number
-                .as_f64()
-                .is_some_and(|candidate| candidate == value as f64))
+    if number.is_u64() {
+        number.as_u64() == Some(value)
+    } else if number.is_f64() && value <= (1_u64 << f64::MANTISSA_DIGITS) {
+        number
+            .as_f64()
+            .is_some_and(|candidate| candidate == value as f64)
+    } else {
+        false
+    }
 }
 
 fn is_token_character(character: char) -> bool {

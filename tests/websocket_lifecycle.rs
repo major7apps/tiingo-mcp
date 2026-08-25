@@ -776,7 +776,7 @@ async fn update_ack_keeps_published_replay_bytes_and_duplicate_classification_st
     let observation = json!({
         "messageType": "A",
         "service": "iex",
-        "data": ["2026-08-25T14:00:05Z", "AAPL", 105.0]
+        "data": ["2026-08-25T14:00:05Z", "AAPL", 5.0]
     })
     .to_string();
     let server_observation = observation.clone();
@@ -871,6 +871,8 @@ async fn update_ack_keeps_published_replay_bytes_and_duplicate_classification_st
         .expect("original cursor replays");
     let replay_bytes = serde_json::to_vec(&replay.events[0]).expect("serialize replayed event");
 
+    assert_eq!(before.events[0].payload["data"][2], 5.0);
+    assert_eq!(duplicate.events[0].payload["data"][2], "[REDACTED]");
     assert!(
         replay_bytes == before_bytes && duplicate.events[0].duplicate,
         "acknowledgement must not mutate replay bytes or stale duplicate truth; replay_stable={}, duplicate={}",
@@ -3761,6 +3763,33 @@ async fn numeric_upstream_id_redaction_preserves_unrelated_market_values() {
         event.payload["boundedText"],
         "subscription-[REDACTED]-active"
     );
+}
+
+#[tokio::test]
+async fn large_numeric_upstream_id_redaction_distinguishes_exact_forms_from_adjacent_u64() {
+    let event = poll_single_raw_event(
+        json!(9_007_199_254_740_992_u64),
+        json!({
+            "messageType": "U",
+            "exactInteger": 9_007_199_254_740_992_u64,
+            "exactFloat": 9_007_199_254_740_992_f64,
+            "adjacentInteger": 9_007_199_254_740_993_u64,
+            "exactText": "9007199254740992",
+            "boundedText": "subscription-9007199254740992-active",
+            "adjacentText": "9007199254740993"
+        }),
+    )
+    .await;
+
+    assert_eq!(event.payload["exactInteger"], "[REDACTED]");
+    assert_eq!(event.payload["exactFloat"], "[REDACTED]");
+    assert_eq!(event.payload["adjacentInteger"], 9_007_199_254_740_993_u64);
+    assert_eq!(event.payload["exactText"], "[REDACTED]");
+    assert_eq!(
+        event.payload["boundedText"],
+        "subscription-[REDACTED]-active"
+    );
+    assert_eq!(event.payload["adjacentText"], "9007199254740993");
 }
 
 #[tokio::test]

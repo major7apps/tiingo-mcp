@@ -753,19 +753,19 @@ async fn queue_text_message(
         serde_json::from_slice(payload).map_err(|_| TiingoError::WebSocketProtocol {
             reason: "message is not one complete JSON object",
         })?;
+    let duplicate_payload_fingerprint =
+        serde_json::to_string(&value).map_err(|_| TiingoError::WebSocketProtocol {
+            reason: "market event could not be encoded",
+        })?;
     redact_sensitive_value(&mut value, authorization, acknowledged_subscription_ids);
     let (vendor_timestamp, symbol) = message_identity(&received.message);
 
     let mut data = session.data.lock().await;
-    let canonical_payload =
-        serde_json::to_string(&value).map_err(|_| TiingoError::WebSocketProtocol {
-            reason: "market event could not be encoded",
-        })?;
     let duplicate = vendor_timestamp
         .as_ref()
         .map(|timestamp| {
             data.seen_observations
-                .insert(format!("{timestamp}\0{canonical_payload}"))
+                .insert(format!("{timestamp}\0{duplicate_payload_fingerprint}"))
         })
         .is_some_and(|inserted| !inserted);
     let out_of_order = match (&symbol, &vendor_timestamp) {
