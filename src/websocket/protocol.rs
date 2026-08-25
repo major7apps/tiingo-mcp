@@ -46,6 +46,14 @@ impl Authorization {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
+
+    pub(crate) fn redact(&self, value: &str) -> String {
+        if self.0.is_empty() {
+            value.to_owned()
+        } else {
+            value.replace(&self.0, "[REDACTED]")
+        }
+    }
 }
 
 impl fmt::Debug for Authorization {
@@ -54,11 +62,20 @@ impl fmt::Debug for Authorization {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum SubscriptionId {
     Number(u64),
     String(String),
+}
+
+impl fmt::Debug for SubscriptionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("SubscriptionId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

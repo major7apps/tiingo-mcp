@@ -99,6 +99,15 @@ fn authorization_is_redacted_from_debug_output() {
 }
 
 #[test]
+fn upstream_subscription_ids_are_redacted_from_debug_output() {
+    let subscription_id = SubscriptionId::String("upstream-debug-secret".into());
+
+    let rendered = format!("{subscription_id:?}");
+    assert!(!rendered.contains("upstream-debug-secret"));
+    assert!(rendered.contains("[REDACTED]"));
+}
+
+#[test]
 fn decodes_the_exact_iex_reference_array_and_both_timestamps() {
     let codec = ProtocolCodec::new(Service::Iex, 6).unwrap();
 

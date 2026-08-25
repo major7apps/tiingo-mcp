@@ -4,6 +4,24 @@ use url::Url;
 
 pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_WEBSOCKET_MESSAGE_BYTES: usize = MAX_RESPONSE_BYTES;
+pub const MAX_WEBSOCKET_SESSIONS: usize = 8;
+pub const MAX_WEBSOCKET_SYMBOLS: usize = 100;
+pub const MAX_WEBSOCKET_QUEUE_EVENTS: usize = 2_048;
+pub const MAX_WEBSOCKET_QUEUE_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_WEBSOCKET_POLL_EVENTS: usize = 256;
+pub const MAX_WEBSOCKET_POLL_BYTES: usize = 1024 * 1024;
+pub const WEBSOCKET_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+pub const WEBSOCKET_POLL_TIMEOUT: Duration = Duration::from_secs(5);
+pub const WEBSOCKET_ABSOLUTE_LIFETIME: Duration = Duration::from_secs(30 * 60);
+pub const WEBSOCKET_IDLE_LIFETIME: Duration = Duration::from_secs(5 * 60);
+pub const WEBSOCKET_LIVENESS_TIMEOUT: Duration = Duration::from_secs(75);
+pub const WEBSOCKET_RECONNECT_DELAYS: [Duration; 5] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1_000),
+    Duration::from_millis(2_000),
+    Duration::from_millis(4_000),
+];
 pub const IEX_WEBSOCKET_URL: &str = "wss://api.tiingo.com/iex";
 pub const CONSOLIDATED_WEBSOCKET_URL: &str = "wss://api.tiingo.com/equity/intraday";
 
