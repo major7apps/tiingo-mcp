@@ -63,12 +63,25 @@ pub struct IntradayPricesArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub resample_freq: Option<IexResample>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
 }
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(extend("properties" = {}))]
+pub struct IexMarketSnapshotArgs {}
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForexQuoteArgs {
     pub ticker: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForexQuotesArgs {
+    pub tickers: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -168,12 +181,24 @@ pub struct DailyFundamentalsArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompanyMetaArgs {
     pub tickers: String,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DistributionsByExDateArgs {
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub ex_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -198,6 +223,8 @@ pub struct DividendYieldArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -210,6 +237,14 @@ pub struct SplitsArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub end_date: Option<chrono::NaiveDate>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SplitsByExDateArgs {
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub ex_date: Option<chrono::NaiveDate>,
 }
 
 fn nullable_integer_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -362,9 +397,21 @@ impl TiingoServer {
                     &args.ticker,
                     range(args.start_date, args.end_date),
                     args.resample_freq,
+                    args.columns.as_deref(),
                 )
                 .await,
         )
+    }
+
+    #[rmcp::tool(
+        description = "Get the all-market IEX snapshot. This bulk route can return a large, entitlement-dependent response.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_iex_market_snapshot(
+        &self,
+        Parameters(_args): Parameters<IexMarketSnapshotArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_iex_market_snapshot().await)
     }
 
     #[rmcp::tool(
@@ -376,6 +423,17 @@ impl TiingoServer {
         Parameters(args): Parameters<ForexQuoteArgs>,
     ) -> CallToolResult {
         tool_result(self.client.get_forex_quote(&args.ticker).await)
+    }
+
+    #[rmcp::tool(
+        description = "Get current top-of-book forex quotes for one to 100 currency pairs.\n\nArgs:\n    tickers: Currency pairs to retrieve (e.g. eurusd, gbpusd).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_forex_quotes(
+        &self,
+        Parameters(args): Parameters<ForexQuotesArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_forex_quotes(&args.tickers).await)
     }
 
     #[rmcp::tool(
@@ -499,7 +557,11 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_daily_fundamentals(&args.ticker, range(args.start_date, args.end_date))
+                .get_daily_fundamentals(
+                    &args.ticker,
+                    range(args.start_date, args.end_date),
+                    args.columns.as_deref(),
+                )
                 .await,
         )
     }
@@ -512,7 +574,22 @@ impl TiingoServer {
         &self,
         Parameters(args): Parameters<CompanyMetaArgs>,
     ) -> CallToolResult {
-        tool_result(self.client.get_company_meta(&args.tickers).await)
+        tool_result(
+            self.client
+                .get_company_meta(&args.tickers, args.columns.as_deref())
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get distributions across tickers for an optional ex-date. Results may include announced future distributions.\n\nArgs:\n    ex_date: Filter by exact ex-date (YYYY-MM-DD).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_distributions_by_ex_date(
+        &self,
+        Parameters(args): Parameters<DistributionsByExDateArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_distributions_by_ex_date(args.ex_date).await)
     }
 
     #[rmcp::tool(
@@ -537,7 +614,11 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_dividend_yield(&args.ticker, range(args.start_date, args.end_date))
+                .get_dividend_yield(
+                    &args.ticker,
+                    range(args.start_date, args.end_date),
+                    args.columns.as_deref(),
+                )
                 .await,
         )
     }
@@ -552,5 +633,16 @@ impl TiingoServer {
                 .get_splits(&args.ticker, range(args.start_date, args.end_date))
                 .await,
         )
+    }
+
+    #[rmcp::tool(
+        description = "Get splits across tickers for an optional ex-date. Results may include announced or cancelled future splits.\n\nArgs:\n    ex_date: Filter by exact ex-date (YYYY-MM-DD).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_splits_by_ex_date(
+        &self,
+        Parameters(args): Parameters<SplitsByExDateArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_splits_by_ex_date(args.ex_date).await)
     }
 }

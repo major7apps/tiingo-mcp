@@ -157,16 +157,16 @@ async fn data_client_methods_use_the_exact_tiingo_routes_and_queries() {
         .await
         .unwrap();
     client
-        .get_daily_fundamentals("AAPL", populated_range())
+        .get_daily_fundamentals("AAPL", populated_range(), None)
         .await
         .unwrap();
-    client.get_company_meta("AAPL,MSFT").await.unwrap();
+    client.get_company_meta("AAPL,MSFT", None).await.unwrap();
     client
         .get_dividends("AAPL", populated_range())
         .await
         .unwrap();
     client
-        .get_dividend_yield("AAPL", populated_range())
+        .get_dividend_yield("AAPL", populated_range(), None)
         .await
         .unwrap();
     client.get_splits("AAPL", populated_range()).await.unwrap();
@@ -287,4 +287,202 @@ async fn omits_absent_optional_data_query_values() {
     for request in server.received_requests().await.unwrap() {
         assert!(request.url.query().is_none());
     }
+}
+
+#[tokio::test]
+async fn column_extensions_and_corporate_action_batches_use_exact_routes_and_queries() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+
+    for route in [
+        "/tiingo/fundamentals/AAPL/daily",
+        "/tiingo/fundamentals/meta",
+        "/tiingo/corporate-actions/AAPL/distribution-yield",
+        "/tiingo/corporate-actions/distributions",
+        "/tiingo/corporate-actions/splits",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    client
+        .get_daily_fundamentals(
+            "AAPL",
+            populated_range(),
+            Some(&["marketCap".to_owned(), "peRatio".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_company_meta(
+            "AAPL,MSFT",
+            Some(&["ticker".to_owned(), "sector".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_dividend_yield(
+            "AAPL",
+            populated_range(),
+            Some(&["trailing12MoYield".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_distributions_by_ex_date(Some(NaiveDate::from_ymd_opt(2027, 2, 15).unwrap()))
+        .await
+        .unwrap();
+    client
+        .get_splits_by_ex_date(Some(NaiveDate::from_ymd_opt(2027, 3, 1).unwrap()))
+        .await
+        .unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            (
+                "/tiingo/corporate-actions/AAPL/distribution-yield".to_owned(),
+                vec![
+                    ("columns".to_owned(), "trailing12MoYield".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            (
+                "/tiingo/corporate-actions/distributions".to_owned(),
+                vec![("exDate".to_owned(), "2027-02-15".to_owned())],
+            ),
+            (
+                "/tiingo/corporate-actions/splits".to_owned(),
+                vec![("exDate".to_owned(), "2027-03-01".to_owned())],
+            ),
+            (
+                "/tiingo/fundamentals/AAPL/daily".to_owned(),
+                vec![
+                    ("columns".to_owned(), "marketCap,peRatio".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            (
+                "/tiingo/fundamentals/meta".to_owned(),
+                vec![
+                    ("columns".to_owned(), "ticker,sector".to_owned()),
+                    ("tickers".to_owned(), "AAPL,MSFT".to_owned()),
+                ],
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn column_extensions_reject_invalid_lists_before_requesting_tiingo() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    for columns in [
+        vec![],
+        vec!["invalid-name".to_owned()],
+        vec!["marketCap".to_owned(); 33],
+    ] {
+        let error = client
+            .get_daily_fundamentals("AAPL", DateRange::default(), Some(&columns))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            tiingo_mcp::error::TiingoError::Validation(_)
+        ));
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn absent_column_and_batch_ex_date_values_omit_query_parameters() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+    for route in [
+        "/tiingo/fundamentals/AAPL/daily",
+        "/tiingo/fundamentals/meta",
+        "/tiingo/corporate-actions/AAPL/distribution-yield",
+        "/tiingo/corporate-actions/distributions",
+        "/tiingo/corporate-actions/splits",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    client
+        .get_daily_fundamentals("AAPL", DateRange::default(), None)
+        .await
+        .unwrap();
+    client.get_company_meta("AAPL", None).await.unwrap();
+    client
+        .get_dividend_yield("AAPL", DateRange::default(), None)
+        .await
+        .unwrap();
+    client.get_distributions_by_ex_date(None).await.unwrap();
+    client.get_splits_by_ex_date(None).await.unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            (
+                "/tiingo/corporate-actions/AAPL/distribution-yield".to_owned(),
+                vec![],
+            ),
+            ("/tiingo/corporate-actions/distributions".to_owned(), vec![]),
+            ("/tiingo/corporate-actions/splits".to_owned(), vec![]),
+            ("/tiingo/fundamentals/AAPL/daily".to_owned(), vec![]),
+            (
+                "/tiingo/fundamentals/meta".to_owned(),
+                vec![("tickers".to_owned(), "AAPL".to_owned())],
+            ),
+        ]
+    );
 }

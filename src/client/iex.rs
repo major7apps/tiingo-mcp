@@ -1,10 +1,14 @@
 use super::{
     TiingoClient,
-    query::{DateRange, IexResample, validate_path_segment},
+    query::{DateRange, IexResample, validate_column_list, validate_path_segment},
 };
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    pub async fn get_iex_market_snapshot(&self) -> Result<serde_json::Value, TiingoError> {
+        self.get_json("IEX market snapshot", "/iex", &[]).await
+    }
+
     pub async fn get_realtime_price(
         &self,
         ticker: &str,
@@ -23,12 +27,16 @@ impl TiingoClient {
         ticker: &str,
         range: DateRange,
         resample: Option<IexResample>,
+        columns: Option<&[String]>,
     ) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         let mut query = Vec::new();
         range.append(&mut query);
         if let Some(value) = resample {
             query.push(("resampleFreq", value.as_str().to_owned()));
+        }
+        if let Some(value) = validate_column_list(columns)? {
+            query.push(("columns", value));
         }
         self.get_json(
             "intraday stock prices",

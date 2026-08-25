@@ -360,9 +360,15 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
     },
     ExpectedToolSchema {
         name: "get_intraday_prices",
-        properties: &["ticker", "start_date", "end_date", "resample_freq"],
+        properties: &[
+            "ticker",
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "columns",
+        ],
         required: &["ticker"],
-        optional: &["start_date", "end_date", "resample_freq"],
+        optional: &["start_date", "end_date", "resample_freq", "columns"],
     },
     ExpectedToolSchema {
         name: "get_forex_quote",
@@ -432,15 +438,15 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
     },
     ExpectedToolSchema {
         name: "get_daily_fundamentals",
-        properties: &["ticker", "start_date", "end_date"],
+        properties: &["ticker", "start_date", "end_date", "columns"],
         required: &["ticker"],
-        optional: &["start_date", "end_date"],
+        optional: &["start_date", "end_date", "columns"],
     },
     ExpectedToolSchema {
         name: "get_company_meta",
-        properties: &["tickers"],
+        properties: &["tickers", "columns"],
         required: &["tickers"],
-        optional: &[],
+        optional: &["columns"],
     },
     ExpectedToolSchema {
         name: "get_dividends",
@@ -450,9 +456,9 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
     },
     ExpectedToolSchema {
         name: "get_dividend_yield",
-        properties: &["ticker", "start_date", "end_date"],
+        properties: &["ticker", "start_date", "end_date", "columns"],
         required: &["ticker"],
-        optional: &["start_date", "end_date"],
+        optional: &["start_date", "end_date", "columns"],
     },
     ExpectedToolSchema {
         name: "get_splits",
@@ -474,10 +480,14 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         .collect::<BTreeSet<_>>();
     let expected_names = TOOL_NAMES.into_iter().collect::<BTreeSet<_>>();
 
-    assert_eq!(tools.len(), TOOL_NAMES.len() + 2);
+    assert_eq!(tools.len(), TOOL_NAMES.len() + 6);
     assert!(expected_names.is_subset(&actual_names));
     assert!(actual_names.contains("get_bulk_eod_prices"));
     assert!(actual_names.contains("get_ticker_metadata"));
+    assert!(actual_names.contains("get_iex_market_snapshot"));
+    assert!(actual_names.contains("get_forex_quotes"));
+    assert!(actual_names.contains("get_distributions_by_ex_date"));
+    assert!(actual_names.contains("get_splits_by_ex_date"));
 
     for tool in &tools {
         assert!(
@@ -567,6 +577,153 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         stock_prices.input_schema["properties"]["resample_freq"]["type"],
         serde_json::json!(["string", "null"])
     );
+
+    for name in [
+        "get_intraday_prices",
+        "get_daily_fundamentals",
+        "get_company_meta",
+        "get_dividend_yield",
+    ] {
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert_eq!(
+            tool.input_schema["properties"]["columns"]["type"],
+            serde_json::json!(["array", "null"]),
+            "{name} must advertise optional columns"
+        );
+        assert_eq!(
+            tool.input_schema["properties"]["columns"]["items"]["type"],
+            serde_json::json!("string"),
+            "{name} must accept string column identifiers"
+        );
+    }
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn additive_task_two_tools_preserve_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let snapshot = serde_json::json!([{"ticker": "AAPL", "tngoLast": 227.16}]);
+    let forex = serde_json::json!([{"ticker": "eurusd", "midPrice": 1.0812}]);
+    let distributions = serde_json::json!([{
+        "ticker": "SPY",
+        "exDate": "2027-02-15",
+        "announcedDate": "2027-01-10",
+        "distribution": 1.23
+    }]);
+    let splits = serde_json::json!([{
+        "ticker": "XYZ",
+        "exDate": "2027-03-01",
+        "announcedDate": "2027-02-01",
+        "isCancelled": true,
+        "splitFactor": 1.5
+    }]);
+    for (route, query, response) in [
+        ("/iex", None, snapshot.clone()),
+        (
+            "/tiingo/fx/top",
+            Some(("tickers", "eurusd,gbpusd")),
+            forex.clone(),
+        ),
+        (
+            "/tiingo/corporate-actions/distributions",
+            Some(("exDate", "2027-02-15")),
+            distributions.clone(),
+        ),
+        (
+            "/tiingo/corporate-actions/splits",
+            Some(("exDate", "2027-03-01")),
+            splits.clone(),
+        ),
+    ] {
+        let mut mock = Mock::given(method("GET")).and(path(route));
+        if let Some((name, value)) = query {
+            mock = mock.and(query_param(name, value));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+    }
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+
+    for (name, call_arguments, expected) in [
+        ("get_iex_market_snapshot", serde_json::json!({}), snapshot),
+        (
+            "get_forex_quotes",
+            serde_json::json!({"tickers": ["EURUSD", "gbpusd"]}),
+            forex,
+        ),
+        (
+            "get_distributions_by_ex_date",
+            serde_json::json!({"ex_date": "2027-02-15"}),
+            distributions,
+        ),
+        (
+            "get_splits_by_ex_date",
+            serde_json::json!({"ex_date": "2027-03-01"}),
+            splits,
+        ),
+    ] {
+        let result = connection
+            .client
+            .call_tool(CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)))
+            .await
+            .unwrap();
+        assert_accurate_success(name, &result, &expected);
+    }
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn legacy_column_extensions_preserve_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let expected = serde_json::json!([{"ticker": "AAPL", "value": 1}]);
+    for (route, columns) in [
+        ("/iex/AAPL/prices", "ticker,close"),
+        ("/tiingo/fundamentals/AAPL/daily", "marketCap,peRatio"),
+        ("/tiingo/fundamentals/meta", "ticker,sector"),
+        (
+            "/tiingo/corporate-actions/AAPL/distribution-yield",
+            "trailing12MoYield",
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("columns", columns))
+            .respond_with(ResponseTemplate::new(200).set_body_json(expected.clone()))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+    }
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+
+    for (name, call_arguments) in [
+        (
+            "get_intraday_prices",
+            serde_json::json!({"ticker": "AAPL", "columns": ["ticker", "close"]}),
+        ),
+        (
+            "get_daily_fundamentals",
+            serde_json::json!({"ticker": "AAPL", "columns": ["marketCap", "peRatio"]}),
+        ),
+        (
+            "get_company_meta",
+            serde_json::json!({"tickers": "AAPL", "columns": ["ticker", "sector"]}),
+        ),
+        (
+            "get_dividend_yield",
+            serde_json::json!({"ticker": "AAPL", "columns": ["trailing12MoYield"]}),
+        ),
+    ] {
+        let result = connection
+            .client
+            .call_tool(CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)))
+            .await
+            .unwrap();
+        assert_accurate_success(name, &result, &expected);
+    }
 
     connection.close().await;
 }

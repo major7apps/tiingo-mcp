@@ -111,7 +111,12 @@ async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
     );
     assert_eq!(
         client
-            .get_intraday_prices("AAPL", populated_range(), Some(IexResample::FiveMinutes))
+            .get_intraday_prices(
+                "AAPL",
+                populated_range(),
+                Some(IexResample::FiveMinutes),
+                None,
+            )
             .await
             .unwrap(),
         serde_json::json!({"route": "intraday"})
@@ -179,6 +184,129 @@ async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
             ),
             ("/tiingo/fx/eurusd/top".to_owned(), vec![]),
         ]
+    );
+}
+
+#[tokio::test]
+async fn iex_snapshot_intraday_columns_and_forex_batch_use_exact_routes_and_queries() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+
+    for route in ["/iex", "/iex/AAPL/prices", "/tiingo/fx/top"] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    client.get_iex_market_snapshot().await.unwrap();
+    client
+        .get_intraday_prices(
+            "AAPL",
+            populated_range(),
+            Some(IexResample::FiveMinutes),
+            Some(&["ticker".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_forex_quotes(&[" EURUSD ".to_owned(), "GBPUSD".to_owned()])
+        .await
+        .unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            ("/iex".to_owned(), vec![]),
+            (
+                "/iex/AAPL/prices".to_owned(),
+                vec![
+                    ("columns".to_owned(), "ticker,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("resampleFreq".to_owned(), "5min".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            (
+                "/tiingo/fx/top".to_owned(),
+                vec![("tickers".to_owned(), "eurusd,gbpusd".to_owned())],
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn market_column_and_forex_pair_lists_reject_invalid_values_before_requesting_tiingo() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    for columns in [
+        vec![],
+        vec!["".to_owned()],
+        vec!["1invalid".to_owned()],
+        vec!["close".to_owned(); 33],
+    ] {
+        let error = client
+            .get_intraday_prices("AAPL", DateRange::default(), None, Some(&columns))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+    }
+
+    for pairs in [
+        vec![],
+        vec!["".to_owned()],
+        vec!["eur/usd".to_owned()],
+        vec!["eurusd".to_owned(); 101],
+    ] {
+        let error = client.get_forex_quotes(&pairs).await.unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn absent_intraday_columns_omit_the_query_parameter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/iex/AAPL/prices"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    client
+        .get_intraday_prices("AAPL", DateRange::default(), None, None)
+        .await
+        .unwrap();
+
+    assert!(
+        server.received_requests().await.unwrap()[0]
+            .url
+            .query()
+            .is_none()
     );
 }
 

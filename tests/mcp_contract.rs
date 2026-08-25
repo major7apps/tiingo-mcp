@@ -214,7 +214,7 @@ fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<std::collections::BTreeSet<_>>();
-    let legacy_tools = tools
+    let mut legacy_tools = tools
         .into_iter()
         .filter(|tool| legacy_names.contains(tool["name"].as_str().unwrap()))
         .collect::<Vec<_>>();
@@ -223,6 +223,33 @@ fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
         legacy_names.len(),
         "legacy tools are missing"
     );
+    for tool in &mut legacy_tools {
+        if matches!(
+            tool["name"].as_str(),
+            Some(
+                "get_intraday_prices"
+                    | "get_daily_fundamentals"
+                    | "get_company_meta"
+                    | "get_dividend_yield"
+            )
+        ) {
+            let properties = tool["inputSchema"]["properties"]
+                .as_object_mut()
+                .expect("legacy tool input schema properties are an object");
+            let columns = properties
+                .remove("columns")
+                .expect("legacy columns extension is present");
+            assert_eq!(
+                normalize_schema(columns),
+                serde_json::json!({
+                    "default": null,
+                    "items": {"type": "string"},
+                    "type": ["array", "null"]
+                }),
+                "legacy columns extension drifted"
+            );
+        }
+    }
     legacy_tools
 }
 
@@ -513,7 +540,7 @@ async fn child_process_contract() -> anyhow::Result<()> {
     let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
-    assert_eq!(client.list_all_tools().await?.len(), 19);
+    assert_eq!(client.list_all_tools().await?.len(), 23);
     assert_eq!(client.list_all_resources().await?.len(), 3);
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);
