@@ -2,6 +2,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod mcp;
+pub mod websocket;
 
 use rmcp::{ServiceExt, transport::stdio};
 

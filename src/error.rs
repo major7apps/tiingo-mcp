@@ -26,6 +26,8 @@ pub enum TiingoError {
     Transport { capability: &'static str },
     #[error("Tiingo returned invalid JSON for {capability}")]
     Decode { capability: &'static str },
+    #[error("Tiingo WebSocket protocol error: {reason}")]
+    WebSocketProtocol { reason: &'static str },
     #[error("Tiingo response for {capability} exceeded {limit} bytes")]
     ResponseTooLarge {
         capability: &'static str,
@@ -133,6 +135,12 @@ impl TiingoError {
             Self::Decode { capability } => payload(
                 "decode",
                 format!("Tiingo returned an unreadable response for {capability}. Retry shortly."),
+                None,
+            ),
+            Self::WebSocketProtocol { .. } => payload(
+                "websocket_protocol",
+                "Tiingo returned a malformed WebSocket message. Stop the subscription and retry."
+                    .into(),
                 None,
             ),
             Self::ResponseTooLarge { capability, limit } => payload(

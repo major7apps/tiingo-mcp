@@ -304,6 +304,12 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     match uri {
         "tiingo://capabilities" => {
             remove_exact(object, "server_version", serde_json::json!("1.1.0"));
+            replace_exact(
+                object,
+                "tool_count",
+                Value::Number(17.into()),
+                Value::Number(34.into()),
+            );
             remove_exact(
                 object,
                 "rate_limits",
@@ -799,6 +805,7 @@ fn every_approved_delta_rejects_mutated_frozen_values() {
 
     for key in [
         "server_version",
+        "tool_count",
         "rate_limits",
         "plan_restrictions",
         "as_of",

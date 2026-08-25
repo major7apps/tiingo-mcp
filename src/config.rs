@@ -3,6 +3,9 @@ use std::{env, fmt, time::Duration};
 use url::Url;
 
 pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_WEBSOCKET_MESSAGE_BYTES: usize = MAX_RESPONSE_BYTES;
+pub const IEX_WEBSOCKET_URL: &str = "wss://api.tiingo.com/iex";
+pub const CONSOLIDATED_WEBSOCKET_URL: &str = "wss://api.tiingo.com/equity/intraday";
 
 #[derive(Clone, Debug)]
 pub struct RetryPolicy {
