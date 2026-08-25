@@ -441,6 +441,464 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     body
 }
 
+fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
+    let object = body.as_object_mut().unwrap();
+    let entitlement_statement = "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability.";
+    match uri {
+        "tiingo://capabilities" => {
+            replace_exact(
+                object,
+                "as_of",
+                Value::String("2026-08-25".to_owned()),
+                Value::String(SOURCE_DATE.to_owned()),
+            );
+            replace_exact(
+                object,
+                "asset_classes",
+                serde_json::json!({
+                    "corporate_actions": {
+                        "data_types": ["dividends", "distribution_yield", "splits", "batch_ex_date"],
+                        "description": "Per-ticker and cross-ticker distributions and splits"
+                    },
+                    "crypto": {
+                        "data_types": ["realtime_quote", "historical_prices", "metadata"],
+                        "description": "Cryptocurrencies across exchanges"
+                    },
+                    "crypto_yield": {
+                        "data_types": ["platforms", "pools", "latest_ticks", "historical_metrics"],
+                        "description": "Crypto lending platform and pool metrics"
+                    },
+                    "forex": {
+                        "data_types": ["realtime_quote", "batch_realtime_quotes", "historical_prices"],
+                        "description": "Foreign exchange currency pairs"
+                    },
+                    "funds": {
+                        "data_types": ["metadata", "fee_metrics"],
+                        "description": "Mutual-fund and ETF fee data"
+                    },
+                    "news": {
+                        "data_types": ["article_search"],
+                        "description": "Filterable financial news articles"
+                    },
+                    "stocks": {
+                        "data_types": ["eod_prices", "bulk_eod_refresh", "lifecycle_metadata", "iex_realtime", "iex_intraday", "consolidated_realtime", "boats_overnight", "fundamentals"],
+                        "description": "Equity EOD, intraday, realtime, lifecycle, and company data"
+                    }
+                }),
+                serde_json::json!({
+                    "crypto": {
+                        "data_types": ["realtime_quote", "historical_prices", "metadata"],
+                        "description": "Cryptocurrencies across exchanges"
+                    },
+                    "forex": {
+                        "data_types": ["realtime_quote", "historical_prices"],
+                        "description": "Foreign exchange currency pairs"
+                    },
+                    "stocks": {
+                        "data_types": ["eod_prices", "intraday_prices", "realtime_quote", "metadata"],
+                        "description": "US and international equities"
+                    }
+                }),
+            );
+            replace_exact(
+                object,
+                "official_sources",
+                serde_json::json!([
+                    "https://www.tiingo.com/documentation/general/overview",
+                    "https://www.tiingo.com/documentation/end-of-day",
+                    "https://www.tiingo.com/documentation/iex",
+                    "https://www.tiingo.com/documentation/equity-realtime-stock-data",
+                    "https://www.tiingo.com/documentation/boats",
+                    "https://www.tiingo.com/documentation/forex",
+                    "https://www.tiingo.com/documentation/crypto",
+                    "https://www.tiingo.com/documentation/news",
+                    "https://www.tiingo.com/documentation/fundamentals",
+                    "https://www.tiingo.com/documentation/mutual-fund-and-etf-fees",
+                    "https://www.tiingo.com/documentation/corporate-actions/dividends",
+                    "https://www.tiingo.com/documentation/corporate-actions/splits",
+                    "https://www.tiingo.com/documentation/utilities/search",
+                    "https://www.tiingo.com/documentation/websockets/iex",
+                    "https://www.tiingo.com/documentation/websockets/equity-realtime-stock-data"
+                ]),
+                serde_json::json!(OFFICIAL_SOURCES),
+            );
+            remove_exact(
+                object,
+                "access",
+                serde_json::json!({
+                    "authentication": "HTTP 401 means Tiingo rejected the credential.",
+                    "authorization": "HTTP 403 or an upstream WebSocket authorization rejection means the credential is not entitled to the requested capability.",
+                    "bulk_usage": "Every live call consumes quota or bandwidth; bulk and all-market operations are not routine live smoke tests.",
+                    "crypto_yield": "Plan and entitlement dependent.",
+                    "fund_fees": "Enterprise or institutional access.",
+                    "fundamentals_and_corporate_actions": "Entitlement dependent.",
+                    "search": "Early beta; response fields can change.",
+                    "ticker_lifecycle_metadata": "Vendor-supplied and availability dependent."
+                }),
+            );
+            remove_exact(
+                object,
+                "upstream_market_data",
+                serde_json::json!({
+                    "description": "Finite start, poll, update, and stop lifecycle over upstream Tiingo WebSockets; MCP transport remains stdio.",
+                    "services": {
+                        "consolidated": {
+                            "hours": "4am-8pm ET",
+                            "status": "beta",
+                            "threshold_levels": [4, 6]
+                        },
+                        "iex": {
+                            "agreement_confirmation_levels": [0, 5],
+                            "default_threshold_level": 6
+                        }
+                    }
+                }),
+            );
+            remove_exact(
+                object,
+                "utilities",
+                serde_json::json!({
+                    "search": {
+                        "data_types": ["asset_search"],
+                        "status": "early beta"
+                    }
+                }),
+            );
+        }
+        "tiingo://guide/corporate-actions" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [
+                        "https://www.tiingo.com/documentation/general/overview",
+                        "https://www.tiingo.com/documentation/corporate-actions/dividends",
+                        "https://www.tiingo.com/documentation/corporate-actions/splits"
+                    ],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": OFFICIAL_SOURCES,
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "common_pitfalls",
+                serde_json::json!([
+                    "Date params for dividends/splits filter by ex-date, not payment date.",
+                    "Batch ex-date results can include announced future actions, and future splits can be cancelled.",
+                    "ETFs (e.g. SPY, QQQ) have dividend data via get_dividends."
+                ]),
+                serde_json::json!([
+                    "Date params for dividends/splits filter by ex-date, not payment date.",
+                    "ETFs (e.g. SPY, QQQ) have dividend data via get_dividends."
+                ]),
+            );
+            replace_exact(
+                object,
+                "tools",
+                serde_json::json!([
+                    "get_distributions_by_ex_date",
+                    "get_dividends",
+                    "get_dividend_yield",
+                    "get_splits",
+                    "get_splits_by_ex_date"
+                ]),
+                serde_json::json!(["get_dividends", "get_dividend_yield", "get_splits"]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Use get_dividends for historical cash distributions; dates filter by ex-dividend date.",
+                    "Use get_dividend_yield for time-series of yield percentage.",
+                    "Use get_splits for historical split events; dates filter by ex-split date.",
+                    "Use get_distributions_by_ex_date or get_splits_by_ex_date for cross-ticker exact-date queries and future announcements.",
+                    "For dividends and splits, start_date/end_date map to startExDate/endExDate internally.",
+                    "For dividend_yield, start_date/end_date map to startDate/endDate."
+                ]),
+                serde_json::json!([
+                    "Use get_dividends for historical cash distributions; dates filter by ex-dividend date.",
+                    "Use get_dividend_yield for time-series of yield percentage.",
+                    "Use get_splits for historical split events; dates filter by ex-split date.",
+                    "For dividends and splits, start_date/end_date map to startExDate/endExDate internally.",
+                    "For dividend_yield, start_date/end_date map to startDate/endDate."
+                ]),
+            );
+        }
+        "tiingo://guide/crypto" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/crypto"],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/crypto"],
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "common_pitfalls",
+                serde_json::json!([
+                    "Crypto tickers are lowercase (btcusd, not BTCUSD).",
+                    "Crypto trades 24/7 -- no market-hours limitation.",
+                    "get_crypto_quote with no tickers returns a large payload; filter by tickers when possible.",
+                    "The deprecated /tiingo/crypto/top route is not implemented; current quotes use /tiingo/crypto/prices."
+                ]),
+                serde_json::json!([
+                    "Crypto tickers are lowercase (btcusd, not BTCUSD).",
+                    "Crypto trades 24/7 -- no market-hours limitation.",
+                    "get_crypto_quote with no tickers returns a large payload; filter by tickers when possible."
+                ]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Use get_crypto_metadata to discover available tickers and supported exchanges.",
+                    "Use get_crypto_quote for current prices; omit tickers to get all supported cryptos.",
+                    "Use get_crypto_prices for historical OHLCV data at various intraday or daily intervals.",
+                    "Pass comma-separated tickers to get_crypto_prices for multiple assets at once.",
+                    "Use the separate crypto-yield guide for lending platforms, pools, ticks, and metrics."
+                ]),
+                serde_json::json!([
+                    "Use get_crypto_metadata to discover available tickers and supported exchanges.",
+                    "Use get_crypto_quote for current prices; omit tickers to get all supported cryptos.",
+                    "Use get_crypto_prices for historical OHLCV data at various intraday or daily intervals.",
+                    "Pass comma-separated tickers to get_crypto_prices for multiple assets at once."
+                ]),
+            );
+        }
+        "tiingo://guide/forex" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/forex"],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/forex"],
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "tools",
+                serde_json::json!(["get_forex_quote", "get_forex_quotes", "get_forex_prices"]),
+                serde_json::json!(["get_forex_quote", "get_forex_prices"]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Use get_forex_quote for the current top-of-book bid/ask for a pair.",
+                    "Use get_forex_quotes for a bounded batch of one to 100 currency pairs.",
+                    "Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling."
+                ]),
+                serde_json::json!([
+                    "Use get_forex_quote for the current top-of-book bid/ask for a pair.",
+                    "Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling."
+                ]),
+            );
+        }
+        "tiingo://guide/fundamentals" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/fundamentals"],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/fundamentals"],
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "common_pitfalls",
+                serde_json::json!([
+                    "Financial statements are reported quarterly and annually; don't expect daily granularity.",
+                    "get_daily_fundamentals returns many rows -- use dates and columns to limit results.",
+                    "get_company_meta accepts comma-separated tickers and optional columns for bounded batch lookups."
+                ]),
+                serde_json::json!([
+                    "Financial statements are reported quarterly and annually; don't expect daily granularity.",
+                    "get_daily_fundamentals returns many rows -- use start_date/end_date to limit results.",
+                    "get_company_meta accepts comma-separated tickers for batch lookups."
+                ]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Call get_fundamentals_definitions once to understand available metrics and their types.",
+                    "Use get_financial_statements for quarterly/annual income, balance sheet, and cash flow data.",
+                    "Use get_daily_fundamentals for time-series of daily metrics like marketCap and P/E ratio; select columns when the full response is unnecessary.",
+                    "Use get_company_meta for sector, industry, country, and SIC code; it supports multiple tickers and selected columns."
+                ]),
+                serde_json::json!([
+                    "Call get_fundamentals_definitions once to understand available metrics and their types.",
+                    "Use get_financial_statements for quarterly/annual income, balance sheet, and cash flow data.",
+                    "Use get_daily_fundamentals for time-series of daily metrics like marketCap and P/E ratio.",
+                    "Use get_company_meta for sector, industry, country, and SIC code; supports multiple tickers."
+                ]),
+            );
+        }
+        "tiingo://guide/news" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/news"],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/news"],
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "common_pitfalls",
+                serde_json::json!([
+                    "Default limit is 10 articles -- increase for broader searches.",
+                    "Omitting tickers returns broad market news, not company-specific.",
+                    "sort_by values are crawlDate and publishedDate (exact case required).",
+                    "Institutional bulk downloads are excluded because their download URLs contain credentials and their payloads are unbounded."
+                ]),
+                serde_json::json!([
+                    "Default limit is 10 articles -- increase for broader searches.",
+                    "Omitting tickers returns broad market news, not company-specific.",
+                    "sort_by values are crawlDate and publishedDate (exact case required)."
+                ]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Filter by tickers to get company-specific news; multiple tickers = OR logic.",
+                    "Filter by tags for topic-based news (e.g. earnings, dividends).",
+                    "Use start_date/end_date to restrict date range; default returns most recent.",
+                    "Paginate with limit and offset for large result sets.",
+                    "Use sort_by='crawlDate' for recency or 'publishedDate' for article publish date.",
+                    "Use the separate search guide to find Tiingo assets by ticker or name; it does not search articles."
+                ]),
+                serde_json::json!([
+                    "Filter by tickers to get company-specific news; multiple tickers = OR logic.",
+                    "Filter by tags for topic-based news (e.g. earnings, dividends).",
+                    "Use start_date/end_date to restrict date range; default returns most recent.",
+                    "Paginate with limit and offset for large result sets.",
+                    "Use sort_by='crawlDate' for recency or 'publishedDate' for article publish date."
+                ]),
+            );
+        }
+        "tiingo://guide/stocks" => {
+            replace_exact(
+                object,
+                "availability",
+                serde_json::json!({
+                    "as_of": "2026-08-25",
+                    "official_sources": [
+                        "https://www.tiingo.com/documentation/general/overview",
+                        "https://www.tiingo.com/documentation/end-of-day",
+                        "https://www.tiingo.com/documentation/iex",
+                        "https://www.tiingo.com/documentation/equity-realtime-stock-data",
+                        "https://www.tiingo.com/documentation/boats"
+                    ],
+                    "statement": entitlement_statement
+                }),
+                serde_json::json!({
+                    "as_of": SOURCE_DATE,
+                    "official_sources": OFFICIAL_SOURCES,
+                    "statement": entitlement_statement
+                }),
+            );
+            replace_exact(
+                object,
+                "common_pitfalls",
+                serde_json::json!([
+                    "Ticker symbols are case-sensitive in the URL -- always uppercase.",
+                    "Intraday data is limited to recent history; check metadata for available date range.",
+                    "get_realtime_price may return stale data outside market hours unless after_hours=True.",
+                    "The vendor-supplied /tiingo/daily/meta route is availability-dependent and requires an explicit columns list.",
+                    "Consolidated 4am-8pm ET and BOATS 8pm-3:59am ET are separate beta products, not one 24x5 endpoint."
+                ]),
+                serde_json::json!([
+                    "Ticker symbols are case-sensitive in the URL -- always uppercase.",
+                    "Intraday data is limited to recent history; check metadata for available date range.",
+                    "get_realtime_price may return stale data outside market hours unless after_hours=True."
+                ]),
+            );
+            replace_exact(
+                object,
+                "description",
+                Value::String("Equities with EOD and bulk refresh, lifecycle metadata, IEX, consolidated realtime, and BOATS overnight data.".to_owned()),
+                Value::String("US and international equities with EOD historical prices, real-time IEX quotes, and intraday data.".to_owned()),
+            );
+            replace_exact(
+                object,
+                "tools",
+                serde_json::json!([
+                    "get_stock_metadata",
+                    "get_stock_prices",
+                    "get_bulk_eod_prices",
+                    "get_ticker_metadata",
+                    "get_realtime_price",
+                    "get_intraday_prices",
+                    "get_iex_market_snapshot",
+                    "get_equity_realtime_snapshot",
+                    "get_equity_intraday_prices",
+                    "get_boats_snapshot",
+                    "get_boats_prices"
+                ]),
+                serde_json::json!([
+                    "get_stock_metadata",
+                    "get_stock_prices",
+                    "get_realtime_price",
+                    "get_intraday_prices"
+                ]),
+            );
+            replace_exact(
+                object,
+                "workflows",
+                serde_json::json!([
+                    "Fetch metadata first with get_stock_metadata to verify ticker validity and date range.",
+                    "Use get_stock_prices for EOD OHLCV history; supports daily/weekly/monthly/annually resampling.",
+                    "Use get_bulk_eod_prices for daily cache refresh, then reseed ticker history when splitFactor != 1 or divCash > 0.",
+                    "Use get_ticker_metadata only with the lifecycle columns needed for the task.",
+                    "Use get_realtime_price for current IEX top-of-book price during market hours.",
+                    "Use get_intraday_prices for sub-daily IEX data at 1min, 5min, 15min, 30min, or 1hour intervals.",
+                    "Use ticker-filtered consolidated or BOATS tools before considering their large all-market snapshots."
+                ]),
+                serde_json::json!([
+                    "Fetch metadata first with get_stock_metadata to verify ticker validity and date range.",
+                    "Use get_stock_prices for EOD OHLCV history; supports daily/weekly/monthly/annually resampling.",
+                    "Use get_realtime_price for current IEX top-of-book price during market hours.",
+                    "Use get_intraday_prices for sub-daily data at 1min, 5min, 15min, 30min, or 1hour intervals."
+                ]),
+            );
+        }
+        _ => {}
+    }
+    body
+}
+
 fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
     normalize_protocol_metadata(result.as_object_mut().unwrap());
     for content in result["contents"].as_array_mut().unwrap() {
@@ -455,16 +913,19 @@ fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Va
         let mut body: Value = serde_json::from_str(content["text"].as_str().unwrap()).unwrap();
         if expected {
             body = expected_resource_body(uri, body);
-        } else if uri == "tiingo://capabilities" {
-            let version = body
-                .as_object_mut()
-                .unwrap()
-                .remove("server_version")
-                .expect("capabilities server_version is present");
-            assert!(
-                version.is_string(),
-                "capabilities server_version is a string"
-            );
+        } else {
+            body = remove_task8_resource_delta(uri, body);
+            if uri == "tiingo://capabilities" {
+                let version = body
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("server_version")
+                    .expect("capabilities server_version is present");
+                assert!(
+                    version.is_string(),
+                    "capabilities server_version is a string"
+                );
+            }
         }
         content["text"] = body;
     }

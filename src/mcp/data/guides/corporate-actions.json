@@ -1,28 +1,33 @@
 {
   "asset_class": "corporate-actions",
   "availability": {
-    "as_of": "2026-08-24",
+    "as_of": "2026-08-25",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
-      "https://api.tiingo.com/documentation/end-of-day"
+      "https://www.tiingo.com/documentation/corporate-actions/dividends",
+      "https://www.tiingo.com/documentation/corporate-actions/splits"
     ],
     "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
   },
   "common_pitfalls": [
     "Date params for dividends/splits filter by ex-date, not payment date.",
+    "Batch ex-date results can include announced future actions, and future splits can be cancelled.",
     "ETFs (e.g. SPY, QQQ) have dividend data via get_dividends."
   ],
   "description": "Dividends, dividend yield history, and stock splits for equities and ETFs.",
   "ticker_format": "Uppercase symbols, e.g. AAPL, SPY, TSLA",
   "tools": [
+    "get_distributions_by_ex_date",
     "get_dividends",
     "get_dividend_yield",
-    "get_splits"
+    "get_splits",
+    "get_splits_by_ex_date"
   ],
   "workflows": [
     "Use get_dividends for historical cash distributions; dates filter by ex-dividend date.",
     "Use get_dividend_yield for time-series of yield percentage.",
     "Use get_splits for historical split events; dates filter by ex-split date.",
+    "Use get_distributions_by_ex_date or get_splits_by_ex_date for cross-ticker exact-date queries and future announcements.",
     "For dividends and splits, start_date/end_date map to startExDate/endExDate internally.",
     "For dividend_yield, start_date/end_date map to startDate/endDate."
   ]

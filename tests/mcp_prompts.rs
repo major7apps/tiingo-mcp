@@ -264,6 +264,18 @@ async fn rejects_invalid_prompt_arguments_and_unknown_prompts() {
             .await
             .is_err()
     );
+    for request in [
+        GetPromptRequestParams::new("compare-stocks").with_arguments(arguments(
+            serde_json::json!({"ticker1": "AAPL", "ticker2": "MSFT", "period": ""}),
+        )),
+        GetPromptRequestParams::new("crypto-market-overview")
+            .with_arguments(arguments(serde_json::json!({"tickers": false}))),
+        GetPromptRequestParams::new("forex-pair-analysis").with_arguments(arguments(
+            serde_json::json!({"pair": "eurusd", "period": 30}),
+        )),
+    ] {
+        assert!(connection.client.get_prompt(request).await.is_err());
+    }
     assert!(
         connection
             .client
@@ -282,6 +294,21 @@ async fn rejects_invalid_prompt_arguments_and_unknown_prompts() {
             .await
             .is_err()
     );
+
+    let custom_period = connection
+        .client
+        .get_prompt(
+            GetPromptRequestParams::new("compare-stocks").with_arguments(arguments(
+                serde_json::json!({
+                    "ticker1": "AAPL",
+                    "ticker2": "MSFT",
+                    "period": "6 months"
+                }),
+            )),
+        )
+        .await
+        .unwrap();
+    assert!(text(&custom_period).contains("past 6 months"));
 
     connection.close().await;
 }

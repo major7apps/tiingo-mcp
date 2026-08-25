@@ -1,0 +1,31 @@
+{
+  "asset_class": "market-data",
+  "availability": {
+    "as_of": "2026-08-25",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://www.tiingo.com/documentation/websockets/iex",
+      "https://www.tiingo.com/documentation/websockets/equity-realtime-stock-data"
+    ],
+    "statement": "Upstream IEX and consolidated-equity WebSocket access depends on current Tiingo account entitlements; these finite tools do not add an MCP WebSocket transport."
+  },
+  "common_pitfalls": [
+    "IEX defaults to threshold 6; levels 0 and 5 require explicit confirmation of a direct IEX market-data agreement.",
+    "Consolidated equity accepts threshold 6 reference or threshold 4 liquidity data and is documented for 4am-8pm ET.",
+    "Poll by local arrival sequence and stop every subscription when finished; threshold changes require stop/start.",
+    "A data_gap terminal state means queue bounds were exceeded and cached continuity must be re-established."
+  ],
+  "description": "Finite start, poll, update, and stop lifecycle for upstream IEX and consolidated-equity market data.",
+  "ticker_format": "One to 100 explicit uppercase equity symbols; wildcards are not supported",
+  "tools": [
+    "start_market_data_subscription",
+    "poll_market_data_subscription",
+    "update_market_data_subscription",
+    "stop_market_data_subscription"
+  ],
+  "workflows": [
+    "Start one service with explicit symbols and the least privileged supported threshold.",
+    "Poll with the last processed local sequence; repeated cursors replay retained events deterministically.",
+    "Update symbols without changing threshold, then stop and await worker cleanup when complete."
+  ]
+}

@@ -417,6 +417,19 @@ async fn column_extensions_reject_invalid_lists_before_requesting_tiingo() {
         ));
     }
 
+    for error in [
+        client
+            .get_crypto_prices("", DateRange::default(), None)
+            .await
+            .unwrap_err(),
+        client.get_company_meta("", None).await.unwrap_err(),
+    ] {
+        assert!(matches!(
+            error,
+            tiingo_mcp::error::TiingoError::Validation(_)
+        ));
+    }
+
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 

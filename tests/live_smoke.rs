@@ -180,11 +180,12 @@ where
         latencies.push(started.elapsed());
     }
     latencies.sort_unstable();
-    let median = latencies[SAMPLES / 2];
+    let min = latencies[0];
+    let p50 = latencies[SAMPLES / 2];
     let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
+    let max = *latencies.last().unwrap();
     println!(
-        "LIVE {capability}: latency min={:?}, median={median:?}, p95={p95:?}, samples={SAMPLES}",
-        latencies[0]
+        "LIVE {capability}: latency count={SAMPLES}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}"
     );
     Ok(LiveOutcome::Success)
 }
@@ -288,11 +289,8 @@ async fn live_market_data_lifecycle(
     stop.map_err(|error| anyhow::anyhow!("LIVE {capability}: stop timed out: {error}"))?
         .map_err(|error| anyhow::anyhow!("LIVE {capability}: stop failed: {error}"))?;
 
-    let mut latencies = [start_latency, poll_latency, stop_latency];
-    latencies.sort_unstable();
     println!(
-        "LIVE {capability}: latency min={:?}, median={:?}, p95={:?}, samples=3",
-        latencies[0], latencies[1], latencies[2]
+        "LIVE {capability}: latency start={start_latency:?}, poll={poll_latency:?}, stop={stop_latency:?}"
     );
     Ok(LiveOutcome::Success)
 }

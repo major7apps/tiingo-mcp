@@ -1,7 +1,7 @@
 {
   "asset_class": "forex",
   "availability": {
-    "as_of": "2026-08-24",
+    "as_of": "2026-08-25",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/forex"
@@ -17,10 +17,12 @@
   "ticker_format": "Lowercase concatenated pair, e.g. eurusd, gbpusd, usdjpy",
   "tools": [
     "get_forex_quote",
+    "get_forex_quotes",
     "get_forex_prices"
   ],
   "workflows": [
     "Use get_forex_quote for the current top-of-book bid/ask for a pair.",
+    "Use get_forex_quotes for a bounded batch of one to 100 currency pairs.",
     "Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling."
   ]
 }

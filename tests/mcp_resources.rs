@@ -3,7 +3,7 @@ use std::time::Duration;
 use rmcp::{
     RoleClient, ServiceExt,
     model::{ReadResourceRequestParams, ResourceContents},
-    service::RunningService,
+    service::{RunningService, ServiceError},
 };
 use tiingo_mcp::{
     client::TiingoClient,
@@ -17,12 +17,16 @@ const FIXED_URIS: [&str; 3] = [
     "tiingo://fundamentals/definitions",
     "tiingo://guide/date-formats",
 ];
-const GUIDES: [&str; 6] = [
+const GUIDES: [&str; 10] = [
     "corporate-actions",
     "crypto",
+    "crypto-yield",
     "forex",
+    "funds",
     "fundamentals",
+    "market-data",
     "news",
+    "search",
     "stocks",
 ];
 
@@ -123,14 +127,19 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         capabilities["tool_count"].as_u64(),
         Some(tools.len() as u64)
     );
-    assert_eq!(capabilities["as_of"], "2026-08-24");
-    assert_eq!(
-        capabilities["official_sources"],
-        serde_json::json!([
-            "https://www.tiingo.com/documentation/general/overview",
-            "https://api.tiingo.com/documentation/end-of-day",
-        ])
-    );
+    assert_eq!(capabilities["as_of"], "2026-08-25");
+    let capability_sources = capabilities["official_sources"].as_array().unwrap();
+    for source in [
+        "https://www.tiingo.com/documentation/general/overview",
+        "https://www.tiingo.com/documentation/end-of-day",
+        "https://www.tiingo.com/documentation/websockets/iex",
+        "https://www.tiingo.com/documentation/websockets/equity-realtime-stock-data",
+    ] {
+        assert!(
+            capability_sources.iter().any(|value| value == source),
+            "capabilities must cite {source}"
+        );
+    }
 
     for asset_class in GUIDES {
         let result = connection
@@ -146,16 +155,30 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         assert_eq!(mime_type.as_deref(), Some("application/json"));
         let guide = json_text(&result);
         assert!(guide.is_object(), "{asset_class} must return JSON");
+        assert_eq!(guide["availability"]["as_of"], "2026-08-25");
+        assert!(
+            guide["availability"]["official_sources"]
+                .as_array()
+                .is_some_and(|sources| !sources.is_empty())
+        );
         let endpoint_documentation = match asset_class {
             "crypto" => Some("https://www.tiingo.com/documentation/crypto"),
+            "crypto-yield" => Some("https://www.tiingo.com/documentation/general/overview"),
             "forex" => Some("https://www.tiingo.com/documentation/forex"),
+            "funds" => Some("https://www.tiingo.com/documentation/mutual-fund-and-etf-fees"),
             "fundamentals" => Some("https://www.tiingo.com/documentation/fundamentals"),
+            "market-data" => Some("https://www.tiingo.com/documentation/websockets/iex"),
             "news" => Some("https://www.tiingo.com/documentation/news"),
+            "search" => Some("https://www.tiingo.com/documentation/utilities/search"),
             _ => None,
         };
         if let Some(endpoint_documentation) = endpoint_documentation {
-            assert_eq!(
-                guide["availability"]["official_sources"][1], endpoint_documentation,
+            assert!(
+                guide["availability"]["official_sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|source| source == endpoint_documentation),
                 "{asset_class} must link to its matching Tiingo documentation"
             );
         }
@@ -179,8 +202,23 @@ async fn advertises_and_reads_corrected_legacy_resources() {
     assert_eq!(
         json_text(&invalid),
         serde_json::json!({
-            "error": "Invalid asset class 'invalid'. Valid values: corporate-actions, crypto, forex, fundamentals, news, stocks"
+            "error": "Invalid asset class 'invalid'. Valid values: corporate-actions, crypto, crypto-yield, forex, funds, fundamentals, market-data, news, search, stocks"
         })
+    );
+
+    let missing = connection
+        .client
+        .read_resource(ReadResourceRequestParams::new("tiingo://unknown"))
+        .await
+        .unwrap_err();
+    let ServiceError::McpError(missing) = missing else {
+        panic!("unknown resource must return an MCP error");
+    };
+    assert_eq!(missing.code, rmcp::model::ErrorCode::RESOURCE_NOT_FOUND);
+    assert_eq!(missing.message, "resource not found");
+    assert_eq!(
+        missing.data,
+        Some(serde_json::json!({"uri": "tiingo://unknown"}))
     );
 
     let mut contents = vec![capabilities.to_string()];

@@ -2109,9 +2109,13 @@ async fn repeated_eod_calls_are_consistent_accurate_and_fast() {
         assert_accurate_success("get_stock_prices", &result, &documented_eod_shape);
     }
     latencies.sort_unstable();
-    let median = latencies[SAMPLES / 2];
+    let min = latencies[0];
+    let p50 = latencies[SAMPLES / 2];
     let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
-    eprintln!("MCP EOD latency: median={median:?}, p95={p95:?}, samples={SAMPLES}");
+    let max = *latencies.last().unwrap();
+    eprintln!(
+        "MCP EOD latency: count={SAMPLES}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}"
+    );
     assert!(
         p95 < P95_LIMIT,
         "MCP EOD p95 latency {p95:?} exceeded {P95_LIMIT:?}"

@@ -1,0 +1,25 @@
+{
+  "asset_class": "funds",
+  "availability": {
+    "as_of": "2026-08-25",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://www.tiingo.com/documentation/mutual-fund-and-etf-fees"
+    ],
+    "statement": "Fund-fee data is restricted to enterprise or institutional access; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Fund metadata and metrics are both part of the restricted fund-fee capability.",
+    "A valid ticker can still return an entitlement error for the current credential."
+  ],
+  "description": "Mutual-fund and ETF metadata plus current and historical fee metrics.",
+  "ticker_format": "Uppercase mutual-fund or ETF symbol, e.g. VFIAX",
+  "tools": [
+    "get_fund_metadata",
+    "get_fund_fee_metrics"
+  ],
+  "workflows": [
+    "Fetch fund metadata to confirm the identifier and available fee context.",
+    "Use fee metrics for the current and historical fee series after entitlement is confirmed."
+  ]
+}

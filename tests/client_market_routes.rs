@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use tiingo_mcp::{
     client::{
         TiingoClient,
-        query::{DateRange, EodResample, IexResample, IntradayResample},
+        query::{DateRange, EodResample, IexResample, IntradayResample, NewsSort},
     },
     config::{Config, RetryPolicy},
     error::TiingoError,
@@ -30,6 +30,47 @@ fn populated_range() -> DateRange {
         start_date: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
         end_date: Some(NaiveDate::from_ymd_opt(2024, 1, 31).unwrap()),
     }
+}
+
+#[test]
+fn query_enums_match_every_supported_tiingo_wire_value() {
+    assert_eq!(
+        [
+            EodResample::Daily.as_str(),
+            EodResample::Weekly.as_str(),
+            EodResample::Monthly.as_str(),
+            EodResample::Annually.as_str(),
+        ],
+        ["daily", "weekly", "monthly", "annually"]
+    );
+    assert_eq!(
+        [
+            IntradayResample::OneMinute.as_str(),
+            IntradayResample::FiveMinutes.as_str(),
+            IntradayResample::FifteenMinutes.as_str(),
+            IntradayResample::ThirtyMinutes.as_str(),
+            IntradayResample::OneHour.as_str(),
+            IntradayResample::OneDay.as_str(),
+        ],
+        ["1min", "5min", "15min", "30min", "1hour", "1day"]
+    );
+    assert_eq!(
+        [
+            IexResample::OneMinute.as_str(),
+            IexResample::FiveMinutes.as_str(),
+            IexResample::FifteenMinutes.as_str(),
+            IexResample::ThirtyMinutes.as_str(),
+            IexResample::OneHour.as_str(),
+        ],
+        ["1min", "5min", "15min", "30min", "1hour"]
+    );
+    assert_eq!(
+        [
+            NewsSort::CrawlDate.as_str(),
+            NewsSort::PublishedDate.as_str()
+        ],
+        ["crawlDate", "publishedDate"]
+    );
 }
 
 #[tokio::test]
