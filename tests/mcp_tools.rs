@@ -2125,71 +2125,82 @@ async fn repeated_eod_calls_are_consistent_accurate_and_fast() {
 }
 
 #[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes one EOD request"]
+#[ignore = "requires TIINGO_API_KEY and consumes three bounded EOD requests"]
 async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     anyhow::ensure!(config.api_key.is_some(), "TIINGO_API_KEY is required");
     let connection = Connection::new(TiingoClient::new(config)?).await;
-    let request = CallToolRequestParams::new("get_stock_prices").with_arguments(arguments(
-        serde_json::json!({
-            "ticker": "AAPL",
-            "start_date": "2024-01-02",
-            "end_date": "2024-01-02"
-        }),
-    ));
+    const SAMPLES: usize = 3;
+    let request = || {
+        CallToolRequestParams::new("get_stock_prices").with_arguments(arguments(
+            serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-02",
+                "end_date": "2024-01-02"
+            }),
+        ))
+    };
+    let mut latencies = Vec::with_capacity(SAMPLES);
+    let mut row_counts = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            connection.client.call_tool(request()),
+        )
+        .await
+        .expect("live MCP EOD request exceeded 10 seconds")?;
+        latencies.push(started.elapsed());
+        anyhow::ensure!(
+            result.is_error == Some(false),
+            "live MCP EOD request failed"
+        );
 
-    let started = Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        connection.client.call_tool(request),
-    )
-    .await
-    .expect("live MCP EOD request exceeded 10 seconds")?;
-    let elapsed = started.elapsed();
-    anyhow::ensure!(
-        result.is_error == Some(false),
-        "live MCP EOD request failed"
-    );
-
-    let structured = result
-        .structured_content
-        .as_ref()
-        .context("live MCP response omitted structured content")?;
-    anyhow::ensure!(structured["meta"]["source"] == "tiingo");
-    let rows = structured["data"]
-        .as_array()
-        .context("live MCP EOD data was not an array")?;
-    anyhow::ensure!(!rows.is_empty(), "live MCP EOD response was empty");
-    for row in rows {
-        let open = row["open"].as_f64().context("open was not numeric")?;
-        let high = row["high"].as_f64().context("high was not numeric")?;
-        let low = row["low"].as_f64().context("low was not numeric")?;
-        let close = row["close"].as_f64().context("close was not numeric")?;
-        anyhow::ensure!(high >= open && high >= close && high >= low);
-        anyhow::ensure!(low <= open && low <= close && low <= high);
-        anyhow::ensure!(row["volume"].as_u64().is_some(), "volume was not unsigned");
-        for field in [
-            "date",
-            "adjOpen",
-            "adjHigh",
-            "adjLow",
-            "adjClose",
-            "adjVolume",
-            "divCash",
-            "splitFactor",
-        ] {
-            anyhow::ensure!(!row[field].is_null(), "{field} was missing");
+        let structured = result
+            .structured_content
+            .as_ref()
+            .context("live MCP response omitted structured content")?;
+        anyhow::ensure!(structured["meta"]["source"] == "tiingo");
+        let rows = structured["data"]
+            .as_array()
+            .context("live MCP EOD data was not an array")?;
+        anyhow::ensure!(!rows.is_empty(), "live MCP EOD response was empty");
+        row_counts.push(rows.len());
+        for row in rows {
+            let open = row["open"].as_f64().context("open was not numeric")?;
+            let high = row["high"].as_f64().context("high was not numeric")?;
+            let low = row["low"].as_f64().context("low was not numeric")?;
+            let close = row["close"].as_f64().context("close was not numeric")?;
+            anyhow::ensure!(high >= open && high >= close && high >= low);
+            anyhow::ensure!(low <= open && low <= close && low <= high);
+            anyhow::ensure!(row["volume"].as_u64().is_some(), "volume was not unsigned");
+            for field in [
+                "date",
+                "adjOpen",
+                "adjHigh",
+                "adjLow",
+                "adjClose",
+                "adjVolume",
+                "divCash",
+                "splitFactor",
+            ] {
+                anyhow::ensure!(!row[field].is_null(), "{field} was missing");
+            }
         }
-    }
 
-    let text = &result.content[0]
-        .as_text()
-        .context("live MCP response omitted JSON text")?
-        .text;
-    anyhow::ensure!(serde_json::from_str::<serde_json::Value>(text)? == structured["data"]);
+        let text = &result.content[0]
+            .as_text()
+            .context("live MCP response omitted JSON text")?
+            .text;
+        anyhow::ensure!(serde_json::from_str::<serde_json::Value>(text)? == structured["data"]);
+    }
+    latencies.sort_unstable();
+    let min = latencies[0];
+    let p50 = latencies[SAMPLES / 2];
+    let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
+    let max = *latencies.last().unwrap();
     eprintln!(
-        "live MCP EOD latency: {elapsed:?}, rows={}, ticker=AAPL, date=2024-01-02",
-        rows.len()
+        "live MCP EOD latency: count={SAMPLES}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}, rows={row_counts:?}, ticker=AAPL, date=2024-01-02"
     );
 
     connection.close().await;

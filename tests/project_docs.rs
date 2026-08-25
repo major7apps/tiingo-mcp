@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -82,6 +82,59 @@ fn first_column_code_values(markdown: &str) -> Vec<String> {
         .collect()
 }
 
+fn markdown_table_rows(markdown: &str) -> Vec<Vec<String>> {
+    markdown
+        .lines()
+        .filter_map(|line| {
+            let line = line.strip_prefix('|')?.strip_suffix('|')?;
+            let cells = line
+                .split('|')
+                .map(|cell| cell.trim().to_owned())
+                .collect::<Vec<_>>();
+            (!cells
+                .first()
+                .is_some_and(|cell| cell == "Tool" || cell == "Ignored test" || cell == "---"))
+            .then_some(cells)
+        })
+        .collect()
+}
+
+fn code_values(value: &str) -> BTreeSet<String> {
+    let mut values = BTreeSet::new();
+    let mut remainder = value;
+    while let Some(open) = remainder.find('`') {
+        remainder = &remainder[open + 1..];
+        let Some(close) = remainder.find('`') else {
+            break;
+        };
+        values.insert(remainder[..close].to_owned());
+        remainder = &remainder[close + 1..];
+    }
+    values
+}
+
+fn ignored_test_names() -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for entry in fs::read_dir(repository_root().join("tests")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).unwrap();
+        let mut awaiting_function = false;
+        for line in source.lines() {
+            let line = line.trim();
+            if line.starts_with("#[ignore") {
+                awaiting_function = true;
+            } else if awaiting_function && let Some(function) = line.strip_prefix("async fn ") {
+                names.insert(function.split('(').next().unwrap().to_owned());
+                awaiting_function = false;
+            }
+        }
+    }
+    names
+}
+
 fn assert_exact_tool_table(markdown: &str, discovered: &BTreeSet<String>, label: &str) {
     let listed = first_column_code_values(markdown);
     let unique = listed.iter().cloned().collect::<BTreeSet<_>>();
@@ -151,12 +204,187 @@ async fn registered_tools_appear_once_in_each_public_tool_matrix() {
     let api_tools = markdown_section(
         &api_surface,
         "## Implemented tools",
-        "## Audited but excluded or deferred",
+        "## Checked-in ignored live smokes",
     );
     assert_exact_tool_table(
         api_tools,
         &discovered,
         "API_SURFACE.md implemented-tool table",
+    );
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn api_surface_uses_exact_rows_vocab_sources_and_live_inventory() {
+    const BULK_EOD_SOURCE: &str = "https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/";
+    const CRYPTO_YIELD_SOURCE: &str = "https://www.tiingo.com/documentation/crypto-yield";
+
+    let connection = Connection::new().await;
+    let discovered = connection
+        .client
+        .list_tools(None)
+        .await
+        .unwrap()
+        .tools
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect::<BTreeSet<_>>();
+    let api_surface = read_root_file("API_SURFACE.md");
+    assert!(
+        api_surface.contains("`L` (bounded read-only live-testable)"),
+        "L must describe live-testability, not checked-in test coverage"
+    );
+    assert!(api_surface.contains(BULK_EOD_SOURCE));
+    assert!(api_surface.contains(CRYPTO_YIELD_SOURCE));
+
+    let implemented = markdown_section(
+        &api_surface,
+        "## Implemented tools",
+        "## Checked-in ignored live smokes",
+    );
+    let rows = markdown_table_rows(implemented);
+    assert_eq!(rows.len(), 38);
+    let approved_statuses = BTreeSet::from(["documented", "beta", "vendor-supplied", "lifecycle"]);
+    let approved_classes = BTreeSet::from(["D", "L", "E", "Q"]);
+    let mut tools = BTreeMap::new();
+    for row in rows {
+        assert_eq!(row.len(), 5, "implemented tool rows must have five cells");
+        let tool = row[0].trim_matches('`').to_owned();
+        assert!(
+            discovered.contains(&tool),
+            "unknown API surface tool {tool}"
+        );
+        assert!(
+            approved_statuses.contains(row[2].as_str()),
+            "{tool} has unapproved status {}",
+            row[2]
+        );
+        let classes = row[4].split(',').map(str::trim).collect::<BTreeSet<_>>();
+        assert!(
+            classes.contains("D"),
+            "{tool} must be deterministic-testable"
+        );
+        assert!(
+            classes.iter().all(|class| approved_classes.contains(class)),
+            "{tool} has unapproved test/access vocabulary: {}",
+            row[4]
+        );
+        assert!(tools.insert(tool, row).is_none());
+    }
+    for tool in [
+        "get_distributions_by_ex_date",
+        "get_dividends",
+        "get_dividend_yield",
+        "get_splits",
+        "get_splits_by_ex_date",
+    ] {
+        assert_eq!(tools[tool][2], "beta", "{tool} must be beta/early-release");
+        assert!(
+            tools[tool][3].contains("Early-release"),
+            "{tool} must identify the corporate-action surface as early-release"
+        );
+    }
+    assert_eq!(tools["get_fundamentals_definitions"][4], "D, L, E, Q");
+
+    let inventory = markdown_section(
+        &api_surface,
+        "## Checked-in ignored live smokes",
+        "## Audited but excluded or deferred",
+    );
+    let inventory = markdown_table_rows(inventory)
+        .into_iter()
+        .map(|row| {
+            assert_eq!(row.len(), 3, "live inventory rows must have three cells");
+            (row[0].trim_matches('`').to_owned(), code_values(&row[1]))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected = BTreeMap::from([
+        (
+            "live_boats_single_ticker".to_owned(),
+            BTreeSet::from([
+                "get_boats_prices".to_owned(),
+                "get_boats_snapshot".to_owned(),
+            ]),
+        ),
+        (
+            "live_consolidated_equity_single_ticker".to_owned(),
+            BTreeSet::from([
+                "get_equity_intraday_prices".to_owned(),
+                "get_equity_realtime_snapshot".to_owned(),
+            ]),
+        ),
+        (
+            "live_consolidated_level_six_single_ticker_websocket".to_owned(),
+            BTreeSet::from([
+                "poll_market_data_subscription".to_owned(),
+                "start_market_data_subscription".to_owned(),
+                "stop_market_data_subscription".to_owned(),
+            ]),
+        ),
+        (
+            "live_crypto_yield_metrics_single_pool".to_owned(),
+            BTreeSet::from(["get_crypto_yield_metrics".to_owned()]),
+        ),
+        (
+            "live_distributions_by_ex_date_tiny_filter".to_owned(),
+            BTreeSet::from(["get_distributions_by_ex_date".to_owned()]),
+        ),
+        (
+            "live_forex_quotes_single_pair".to_owned(),
+            BTreeSet::from(["get_forex_quotes".to_owned()]),
+        ),
+        (
+            "live_fund_fees_single_ticker".to_owned(),
+            BTreeSet::from([
+                "get_fund_fee_metrics".to_owned(),
+                "get_fund_metadata".to_owned(),
+            ]),
+        ),
+        (
+            "live_iex_level_six_single_ticker_websocket".to_owned(),
+            BTreeSet::from([
+                "poll_market_data_subscription".to_owned(),
+                "start_market_data_subscription".to_owned(),
+                "stop_market_data_subscription".to_owned(),
+            ]),
+        ),
+        (
+            "live_mcp_eod_data_is_consistent_accurate_and_timely".to_owned(),
+            BTreeSet::from(["get_stock_prices".to_owned()]),
+        ),
+        (
+            "live_read_only_tiingo_capabilities".to_owned(),
+            BTreeSet::from([
+                "get_crypto_quote".to_owned(),
+                "get_dividends".to_owned(),
+                "get_forex_quote".to_owned(),
+                "get_fundamentals_definitions".to_owned(),
+                "get_news".to_owned(),
+                "get_stock_metadata".to_owned(),
+                "get_stock_prices".to_owned(),
+            ]),
+        ),
+        (
+            "live_search_early_beta".to_owned(),
+            BTreeSet::from(["search_tiingo_assets".to_owned()]),
+        ),
+        (
+            "live_splits_by_ex_date_tiny_filter".to_owned(),
+            BTreeSet::from(["get_splits_by_ex_date".to_owned()]),
+        ),
+    ]);
+    assert_eq!(inventory, expected);
+    assert_eq!(
+        inventory.keys().cloned().collect::<BTreeSet<_>>(),
+        ignored_test_names(),
+        "API live inventory must match checked-in ignored tests"
+    );
+    assert!(
+        inventory
+            .values()
+            .flatten()
+            .all(|tool| discovered.contains(tool))
     );
 
     connection.close().await;

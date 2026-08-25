@@ -132,6 +132,8 @@ async fn advertises_and_reads_corrected_legacy_resources() {
     for source in [
         "https://www.tiingo.com/documentation/general/overview",
         "https://www.tiingo.com/documentation/end-of-day",
+        "https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/",
+        "https://www.tiingo.com/documentation/crypto-yield",
         "https://www.tiingo.com/documentation/websockets/iex",
         "https://www.tiingo.com/documentation/websockets/equity-realtime-stock-data",
     ] {
@@ -163,7 +165,7 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         );
         let endpoint_documentation = match asset_class {
             "crypto" => Some("https://www.tiingo.com/documentation/crypto"),
-            "crypto-yield" => Some("https://www.tiingo.com/documentation/general/overview"),
+            "crypto-yield" => Some("https://www.tiingo.com/documentation/crypto-yield"),
             "forex" => Some("https://www.tiingo.com/documentation/forex"),
             "funds" => Some("https://www.tiingo.com/documentation/mutual-fund-and-etf-fees"),
             "fundamentals" => Some("https://www.tiingo.com/documentation/fundamentals"),
@@ -186,6 +188,22 @@ async fn advertises_and_reads_corrected_legacy_resources() {
             assert_eq!(
                 guide["common_pitfalls"][0],
                 "Financial statements are reported quarterly and annually; don't expect daily granularity."
+            );
+        }
+        if asset_class == "crypto-yield" {
+            assert_eq!(
+                guide["availability"]["official_sources"],
+                serde_json::json!(["https://www.tiingo.com/documentation/crypto-yield"]),
+                "Crypto Yield must cite its exact product documentation"
+            );
+        }
+        if asset_class == "stocks" {
+            assert!(
+                guide["availability"]["official_sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|source| source == "https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/")
             );
         }
     }

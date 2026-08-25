@@ -32,6 +32,7 @@ enum ResponseShape {
     NewsArticle,
     FundamentalsDefinition,
     Dividend { ticker: &'static str },
+    Split { ticker: &'static str },
 }
 
 impl ResponseShape {
@@ -100,8 +101,54 @@ impl ResponseShape {
                     })
                 })
             }),
+            Self::Split { ticker } => value.as_array().is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.as_object().is_some_and(|object| {
+                        string_field_is(object, "ticker", ticker)
+                            && non_empty_string(object, "exDate")
+                            && has_number(object, &["splitFactor"])
+                    })
+                })
+            }),
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct LatencyDistribution {
+    count: usize,
+    min: Duration,
+    p50: Duration,
+    p95: Duration,
+    max: Duration,
+}
+
+fn latency_distribution(samples: &[Duration]) -> LatencyDistribution {
+    assert!(!samples.is_empty());
+    let mut samples = samples.to_vec();
+    samples.sort_unstable();
+    let count = samples.len();
+    LatencyDistribution {
+        count,
+        min: samples[0],
+        p50: samples[count / 2],
+        p95: samples[(count * 95).div_ceil(100) - 1],
+        max: *samples.last().unwrap(),
+    }
+}
+
+fn report_latency_distribution(capability: &str, operation: &str, samples: &[Duration]) {
+    let summary = latency_distribution(samples);
+    let LatencyDistribution {
+        count,
+        min,
+        p50,
+        p95,
+        max,
+    } = summary;
+    println!(
+        "LIVE {capability}: operation={operation}, latency count={count}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}"
+    );
 }
 
 fn non_empty_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
@@ -179,14 +226,7 @@ where
         }
         latencies.push(started.elapsed());
     }
-    latencies.sort_unstable();
-    let min = latencies[0];
-    let p50 = latencies[SAMPLES / 2];
-    let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
-    let max = *latencies.last().unwrap();
-    println!(
-        "LIVE {capability}: latency count={SAMPLES}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}"
-    );
+    report_latency_distribution(capability, "request", &latencies);
     Ok(LiveOutcome::Success)
 }
 
@@ -226,84 +266,121 @@ async fn live_market_data_lifecycle(
     require_live_api_key()?;
     let api_key = std::env::var("TIINGO_API_KEY")?;
     let registry = MarketDataRegistry::new(Some(api_key));
-    let started_at = Instant::now();
-    let start = tokio::time::timeout(
-        Duration::from_secs(10),
-        registry.start(StartRequest {
-            service,
-            symbols: vec!["AAPL".to_owned()],
-            threshold_level: None,
-            confirm_iex_market_data_agreement: false,
-        }),
-    )
-    .await;
-    let start_latency = started_at.elapsed();
-    let subscription_id = match start {
-        Ok(Ok(result)) => {
-            anyhow::ensure!(result.state == SubscriptionStatus::Active);
-            result.id
-        }
-        Ok(Err(TiingoError::Entitlement { .. })) => {
-            registry.shutdown().await;
-            println!("LIVE {capability}: entitlement (HTTP 403)");
-            return Ok(LiveOutcome::Entitlement);
-        }
-        Ok(Err(error)) => {
-            registry.shutdown().await;
-            return Err(anyhow::anyhow!("LIVE {capability}: {error}"));
-        }
-        Err(error) => {
-            registry.shutdown().await;
-            return Err(anyhow::anyhow!(
-                "LIVE {capability}: initial acknowledgement exceeded the finite timeout: {error}"
-            ));
-        }
-    };
+    const SAMPLES: usize = 3;
+    let mut start_latencies = Vec::with_capacity(SAMPLES);
+    let mut poll_latencies = Vec::with_capacity(SAMPLES);
+    let mut stop_latencies = Vec::with_capacity(SAMPLES);
 
-    let poll_started_at = Instant::now();
-    let poll = tokio::time::timeout(
-        Duration::from_secs(6),
-        registry.poll_with_bounds(&subscription_id, 0, 1, Duration::from_secs(5)),
-    )
-    .await;
-    let poll_latency = poll_started_at.elapsed();
+    for _ in 0..SAMPLES {
+        let started_at = Instant::now();
+        let start = tokio::time::timeout(
+            Duration::from_secs(10),
+            registry.start(StartRequest {
+                service,
+                symbols: vec!["AAPL".to_owned()],
+                threshold_level: None,
+                confirm_iex_market_data_agreement: false,
+            }),
+        )
+        .await;
+        start_latencies.push(started_at.elapsed());
+        let subscription_id = match start {
+            Ok(Ok(result)) => {
+                if result.state != SubscriptionStatus::Active {
+                    registry.shutdown().await;
+                    anyhow::bail!("LIVE {capability}: start did not become active");
+                }
+                result.id
+            }
+            Ok(Err(TiingoError::Entitlement { .. })) => {
+                registry.shutdown().await;
+                println!("LIVE {capability}: entitlement (HTTP 403)");
+                return Ok(LiveOutcome::Entitlement);
+            }
+            Ok(Err(error)) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!("LIVE {capability}: {error}"));
+            }
+            Err(error) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!(
+                    "LIVE {capability}: initial acknowledgement exceeded the finite timeout: {error}"
+                ));
+            }
+        };
 
-    let stop_started_at = Instant::now();
-    let stop = tokio::time::timeout(Duration::from_secs(6), registry.stop(&subscription_id)).await;
-    let stop_latency = stop_started_at.elapsed();
-    registry.shutdown().await;
+        let poll_started_at = Instant::now();
+        let poll = tokio::time::timeout(
+            Duration::from_secs(6),
+            registry.poll_with_bounds(&subscription_id, 0, 1, Duration::from_secs(5)),
+        )
+        .await;
+        poll_latencies.push(poll_started_at.elapsed());
 
-    let poll = poll
-        .map_err(|error| anyhow::anyhow!("LIVE {capability}: poll timed out: {error}"))?
-        .map_err(|error| anyhow::anyhow!("LIVE {capability}: {error}"))?;
-    anyhow::ensure!(poll.events.len() <= 1);
-    if let Some(event) = poll.events.first() {
-        anyhow::ensure!(
-            matches!(
+        let stop_started_at = Instant::now();
+        let stop =
+            tokio::time::timeout(Duration::from_secs(6), registry.stop(&subscription_id)).await;
+        stop_latencies.push(stop_started_at.elapsed());
+
+        let poll = match poll {
+            Ok(Ok(poll)) => poll,
+            Ok(Err(error)) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!("LIVE {capability}: {error}"));
+            }
+            Err(error) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!(
+                    "LIVE {capability}: poll timed out: {error}"
+                ));
+            }
+        };
+        if poll.events.len() > 1 {
+            registry.shutdown().await;
+            anyhow::bail!("LIVE {capability}: bounded poll returned more than one event");
+        }
+        if let Some(event) = poll.events.first() {
+            if !matches!(
                 event.payload.get("messageType").and_then(Value::as_str),
                 Some("A" | "H")
-            ),
-            "LIVE {capability}: bounded poll returned an unexpected message type"
-        );
+            ) {
+                registry.shutdown().await;
+                anyhow::bail!(
+                    "LIVE {capability}: bounded poll returned an unexpected message type"
+                );
+            }
+        }
+        match stop {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!("LIVE {capability}: stop failed: {error}"));
+            }
+            Err(error) => {
+                registry.shutdown().await;
+                return Err(anyhow::anyhow!(
+                    "LIVE {capability}: stop timed out: {error}"
+                ));
+            }
+        }
     }
-    stop.map_err(|error| anyhow::anyhow!("LIVE {capability}: stop timed out: {error}"))?
-        .map_err(|error| anyhow::anyhow!("LIVE {capability}: stop failed: {error}"))?;
+    registry.shutdown().await;
 
-    println!(
-        "LIVE {capability}: latency start={start_latency:?}, poll={poll_latency:?}, stop={stop_latency:?}"
-    );
+    report_latency_distribution(capability, "start", &start_latencies);
+    report_latency_distribution(capability, "poll", &poll_latencies);
+    report_latency_distribution(capability, "stop", &stop_latencies);
     Ok(LiveOutcome::Success)
 }
 
 #[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes one bounded IEX WebSocket subscription"]
+#[ignore = "requires TIINGO_API_KEY and consumes three bounded IEX WebSocket subscriptions"]
 async fn live_iex_level_six_single_ticker_websocket() -> anyhow::Result<()> {
     live_market_data_lifecycle("IEX level-6 WebSocket", Service::Iex).await?;
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, a documented consolidated session, and consumes one bounded WebSocket subscription"]
+#[ignore = "requires TIINGO_API_KEY, a documented consolidated session, and consumes three bounded WebSocket subscriptions"]
 async fn live_consolidated_level_six_single_ticker_websocket() -> anyhow::Result<()> {
     live_market_data_lifecycle("consolidated level-6 WebSocket", Service::Consolidated).await?;
     Ok(())
@@ -426,6 +503,55 @@ async fn live_crypto_yield_metrics_single_pool() -> anyhow::Result<()> {
                 Some(IntradayResample::FiveMinutes),
             )
         },
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY and consumes three bounded forex quote requests"]
+async fn live_forex_quotes_single_pair() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+    let pairs = vec!["eurusd".to_owned()];
+
+    classify_samples(
+        "batch forex quote",
+        ResponseShape::ForexQuote { ticker: "eurusd" },
+        || client.get_forex_quotes(&pairs),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, corporate-action entitlement, and consumes three bounded distribution requests"]
+async fn live_distributions_by_ex_date_tiny_filter() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    classify_samples(
+        "distributions by exact ex-date",
+        ResponseShape::Dividend { ticker: "AAPL" },
+        || client.get_distributions_by_ex_date(Some(date(2024, 2, 9))),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, corporate-action entitlement, and consumes three bounded split requests"]
+async fn live_splits_by_ex_date_tiny_filter() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    classify_samples(
+        "splits by exact ex-date",
+        ResponseShape::Split { ticker: "NVDA" },
+        || client.get_splits_by_ex_date(Some(date(2024, 6, 10))),
     )
     .await?;
 
@@ -592,4 +718,19 @@ fn family_specific_live_shapes_require_identity_and_stable_fields() {
         "ticker": "AAPL",
         "exDate": "2024-11-08"
     }])));
+}
+
+#[test]
+fn latency_distribution_uses_count_min_p50_p95_and_max() {
+    let summary = latency_distribution(&[
+        Duration::from_millis(50),
+        Duration::from_millis(10),
+        Duration::from_millis(30),
+    ]);
+
+    assert_eq!(summary.count, 3);
+    assert_eq!(summary.min, Duration::from_millis(10));
+    assert_eq!(summary.p50, Duration::from_millis(30));
+    assert_eq!(summary.p95, Duration::from_millis(50));
+    assert_eq!(summary.max, Duration::from_millis(50));
 }

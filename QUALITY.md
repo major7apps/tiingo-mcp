@@ -52,6 +52,8 @@ The normal suite is deterministic, local, and credential-free. Mock HTTP servers
 
 Ignored live tests are read-only, require a nonempty `TIINGO_API_KEY`, and consume quota or bandwidth. Run them only with explicit authorization. Use fixed tickers, dates, small filters, and finite waits. Treat a documented 403 as entitlement evidence, not a product failure. Never use bulk or all-market operations as routine smoke tests, and never force reconnect/flood behavior against Tiingo.
 
+`L` in [API_SURFACE.md](API_SURFACE.md) means bounded read-only live-testable, not that each operation has a dedicated ignored case. The separate checked-in live-smoke inventory is the exact harness; its test names and represented tools are mechanically reconciled with the Rust test sources.
+
 Fixture accuracy means literal fields survive the Tiingo-to-MCP boundary and documented invariants hold. A live response from Tiingo is consistency/shape evidence, not independent price accuracy. Any independent-price accuracy claim requires a separately sourced, contemporaneous comparison with the source and observation time recorded.
 
 ## Performance evidence

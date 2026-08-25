@@ -76,11 +76,13 @@
   "official_sources": [
     "https://www.tiingo.com/documentation/general/overview",
     "https://www.tiingo.com/documentation/end-of-day",
+    "https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/",
     "https://www.tiingo.com/documentation/iex",
     "https://www.tiingo.com/documentation/equity-realtime-stock-data",
     "https://www.tiingo.com/documentation/boats",
     "https://www.tiingo.com/documentation/forex",
     "https://www.tiingo.com/documentation/crypto",
+    "https://www.tiingo.com/documentation/crypto-yield",
     "https://www.tiingo.com/documentation/news",
     "https://www.tiingo.com/documentation/fundamentals",
     "https://www.tiingo.com/documentation/mutual-fund-and-etf-fees",
