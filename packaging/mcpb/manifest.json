@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "tiingo-mcp",
   "display_name": "Tiingo MCP",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Stocks, forex, crypto, news, fundamentals, and corporate actions from Tiingo.",
   "author": { "name": "Major7" },
   "repository": { "type": "git", "url": "https://github.com/major7apps/tiingo-mcp" },

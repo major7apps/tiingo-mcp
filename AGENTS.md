@@ -81,6 +81,7 @@ Each native CI job builds and validates an MCPB 0.3 bundle. Release automation i
 
 - Keep the version synchronized in `Cargo.toml`, the root `tiingo-mcp` entry in `Cargo.lock`, and `packaging/mcpb/manifest.json`.
 - Add the matching `CHANGELOG.md` section as `X.Y.Z (Unreleased)` while changes are accumulating.
-- Before creating the release tag, replace `Unreleased` with the release date. cargo-dist uses that heading for the GitHub Release title; tagging first will publish an incorrect `(Unreleased)` title.
+- Before creating the release tag, replace `Unreleased` with the release date for changelog history.
+- Keep the GitHub Release title derived from the tag without a supported namespace or leading `v` so the webpage shows only `X.Y.Z`, with no date or timestamp.
 - Keep current-release URLs in `README.md` pointed at the latest published tag until the replacement release exists.
 - Run the full verification set plus `dist plan` and `cargo publish --dry-run --locked` before requesting release authorization.
