@@ -4674,9 +4674,22 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .await
         .expect("subscription starts");
     tokio::time::pause();
+    const HEARTBEAT_CYCLES: u8 = 29;
+    const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
+    const PRE_RECONNECT_SECONDS: u64 = 58;
+    const FINAL_EXPIRY_SECONDS: u64 = 2;
+    const ABSOLUTE_LIFETIME_SECONDS: u64 = 1_800;
+    const IDLE_LIFETIME_SECONDS: u64 = 300;
+    let virtual_elapsed_seconds = u64::from(HEARTBEAT_CYCLES) * HEARTBEAT_INTERVAL_SECONDS
+        + PRE_RECONNECT_SECONDS
+        + FINAL_EXPIRY_SECONDS;
+    assert_eq!(
+        virtual_elapsed_seconds, ABSOLUTE_LIFETIME_SECONDS,
+        "the test schedule reaches the absolute lifetime instead of the idle lifetime"
+    );
 
-    for cycle in 0..4_u8 {
-        tokio::time::advance(Duration::from_secs(60)).await;
+    for cycle in 0..HEARTBEAT_CYCLES {
+        tokio::time::advance(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS)).await;
         tokio::time::resume();
         let (heartbeat_sent, heartbeat_received) = tokio::sync::oneshot::channel();
         heartbeat_requests
@@ -4685,9 +4698,32 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         heartbeat_received
             .await
             .unwrap_or_else(|_| panic!("worker processes heartbeat in cycle {cycle}"));
+        if (cycle + 1) % 4 == 0 {
+            let access = registry
+                .poll_with_bounds(&started.id, u64::MAX, 1, Duration::ZERO)
+                .await
+                .expect("bounded public access refreshes idle expiry");
+            assert_eq!(access.state, SubscriptionStatus::Active);
+        }
         tokio::time::pause();
     }
-    tokio::time::advance(Duration::from_secs(58)).await;
+    tokio::time::resume();
+    let last_public_access = registry
+        .poll_with_bounds(&started.id, u64::MAX, 1, Duration::ZERO)
+        .await
+        .expect("final bounded public access refreshes idle expiry");
+    assert_eq!(last_public_access.state, SubscriptionStatus::Active);
+    tokio::time::pause();
+    let last_public_access_seconds = u64::from(HEARTBEAT_CYCLES) * HEARTBEAT_INTERVAL_SECONDS;
+    assert_eq!(last_public_access_seconds, 1_740);
+    let earliest_idle_deadline_seconds = last_public_access_seconds + IDLE_LIFETIME_SECONDS;
+    assert_eq!(earliest_idle_deadline_seconds, 2_040);
+    assert!(
+        earliest_idle_deadline_seconds > ABSOLUTE_LIFETIME_SECONDS,
+        "the refreshed idle deadline must remain after absolute expiry"
+    );
+
+    tokio::time::advance(Duration::from_secs(PRE_RECONNECT_SECONDS)).await;
     tokio::time::resume();
     disconnect.send(()).expect("request disconnect");
     let (delay, release) = requested_delays
@@ -4701,7 +4737,7 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .expect("fresh subscribe is sent before expiry");
 
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(2)).await;
+    tokio::time::advance(Duration::from_secs(FINAL_EXPIRY_SECONDS)).await;
     tokio::time::resume();
     reconnect_closed_received
         .await
