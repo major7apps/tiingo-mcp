@@ -18,7 +18,7 @@ use crate::{
     error::TiingoError,
     websocket::protocol::{
         Authorization, MarketData, ProtocolCodec, RawMessageType, ServerMessage, Service,
-        SubscriptionAction, SubscriptionId,
+        SubscriptionAction, SubscriptionId, json_number_matches_u64, redact_bounded_secret,
     },
 };
 
@@ -282,20 +282,7 @@ pub(super) async fn run_worker(
         {
             ReconnectOutcome::Connected(new_socket, new_subscription_id) => {
                 socket = *new_socket;
-                if remember_subscription_id(
-                    &mut acknowledged_subscription_ids,
-                    &new_subscription_id,
-                ) && redact_retained_events(
-                    &session,
-                    &authorization,
-                    &acknowledged_subscription_ids,
-                )
-                .await
-                .is_err()
-                {
-                    bounded_close_socket(&mut socket).await;
-                    return;
-                }
+                remember_subscription_id(&mut acknowledged_subscription_ids, &new_subscription_id);
                 subscription_id = new_subscription_id;
                 last_liveness = Instant::now();
                 set_status(&session, SubscriptionStatus::Active).await;
@@ -466,46 +453,88 @@ async fn apply_update(
     validate_resulting_symbols(symbols, &add_symbols, &remove_symbols)?;
 
     if !remove_symbols.is_empty() {
-        let acknowledged_subscription_id = send_update_and_ack(
+        let mut buffered_messages = BufferedTextMessages::default();
+        let acknowledgement = send_update_and_ack(
             socket,
             codec,
             session,
             clock,
             last_liveness,
-            acknowledged_subscription_ids,
+            &mut buffered_messages,
             SubscriptionAction::Unsubscribe,
             authorization.clone(),
             subscription_id.clone(),
             remove_symbols.clone(),
         )
-        .await?;
-        let is_new =
-            remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
+        .await;
+        let acknowledged_subscription_id = match acknowledgement {
+            Ok(subscription_id) => subscription_id,
+            Err(error) => {
+                if !buffered_messages.overflowed {
+                    publish_buffered_messages(
+                        session,
+                        codec,
+                        &authorization,
+                        acknowledged_subscription_ids,
+                        buffered_messages,
+                    )
+                    .await?;
+                }
+                return Err(error);
+            }
+        };
+        remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
         *subscription_id = acknowledged_subscription_id;
-        if is_new {
-            redact_retained_events(session, &authorization, acknowledged_subscription_ids).await?;
-        }
+        publish_buffered_messages(
+            session,
+            codec,
+            &authorization,
+            acknowledged_subscription_ids,
+            buffered_messages,
+        )
+        .await?;
     }
     if !add_symbols.is_empty() {
-        let acknowledged_subscription_id = send_update_and_ack(
+        let mut buffered_messages = BufferedTextMessages::default();
+        let acknowledgement = send_update_and_ack(
             socket,
             codec,
             session,
             clock,
             last_liveness,
-            acknowledged_subscription_ids,
+            &mut buffered_messages,
             SubscriptionAction::Subscribe,
             authorization.clone(),
             subscription_id.clone(),
             add_symbols.clone(),
         )
-        .await?;
-        let is_new =
-            remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
+        .await;
+        let acknowledged_subscription_id = match acknowledgement {
+            Ok(subscription_id) => subscription_id,
+            Err(error) => {
+                if !buffered_messages.overflowed {
+                    publish_buffered_messages(
+                        session,
+                        codec,
+                        &authorization,
+                        acknowledged_subscription_ids,
+                        buffered_messages,
+                    )
+                    .await?;
+                }
+                return Err(error);
+            }
+        };
+        remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
         *subscription_id = acknowledged_subscription_id;
-        if is_new {
-            redact_retained_events(session, &authorization, acknowledged_subscription_ids).await?;
-        }
+        publish_buffered_messages(
+            session,
+            codec,
+            &authorization,
+            acknowledged_subscription_ids,
+            buffered_messages,
+        )
+        .await?;
     }
     symbols.retain(|symbol| !remove_symbols.contains(symbol));
     symbols.extend(add_symbols);
@@ -549,7 +578,7 @@ async fn send_update_and_ack(
     session: &Session,
     clock: &dyn ReceiveClock,
     last_liveness: &mut Instant,
-    acknowledged_subscription_ids: &[SubscriptionId],
+    buffered_messages: &mut BufferedTextMessages,
     action: SubscriptionAction,
     authorization: Authorization,
     subscription_id: SubscriptionId,
@@ -570,9 +599,8 @@ async fn send_update_and_ack(
         wait_for_update_ack(
             socket,
             codec,
-            &authorization,
-            acknowledged_subscription_ids,
             session,
+            buffered_messages,
             clock,
             last_liveness,
         )
@@ -587,6 +615,82 @@ async fn send_update_and_ack(
 enum QueueOutcome {
     Continue { refresh_liveness: bool },
     DataGap,
+}
+
+struct BufferedTextMessage {
+    received_at: DateTime<Utc>,
+    payload: Vec<u8>,
+}
+
+#[derive(Default)]
+struct BufferedTextMessages {
+    messages: Vec<BufferedTextMessage>,
+    bytes: usize,
+    overflowed: bool,
+}
+
+async fn buffer_text_message(
+    session: &Session,
+    buffered_messages: &mut BufferedTextMessages,
+    received_at: DateTime<Utc>,
+    payload: &[u8],
+) -> Result<(), TiingoError> {
+    let message_bytes = payload
+        .len()
+        .saturating_add(std::mem::size_of::<BufferedTextMessage>());
+    let exceeds_bounds = {
+        let data = session.data.lock().await;
+        data.events
+            .len()
+            .saturating_add(buffered_messages.messages.len())
+            >= MAX_WEBSOCKET_QUEUE_EVENTS
+            || data
+                .queue_bytes
+                .saturating_add(buffered_messages.bytes)
+                .saturating_add(message_bytes)
+                > MAX_WEBSOCKET_QUEUE_BYTES
+    };
+    if exceeds_bounds {
+        buffered_messages.overflowed = true;
+        set_status(session, SubscriptionStatus::DataGap).await;
+        return Err(TiingoError::WebSocketProtocol {
+            reason: "market-data queue overflowed while awaiting an update acknowledgement",
+        });
+    }
+    buffered_messages.bytes = buffered_messages.bytes.saturating_add(message_bytes);
+    buffered_messages.messages.push(BufferedTextMessage {
+        received_at,
+        payload: payload.to_vec(),
+    });
+    Ok(())
+}
+
+async fn publish_buffered_messages(
+    session: &Session,
+    codec: &ProtocolCodec,
+    authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
+    buffered_messages: BufferedTextMessages,
+) -> Result<(), TiingoError> {
+    for message in buffered_messages.messages {
+        if matches!(
+            queue_text_message(
+                session,
+                codec,
+                authorization,
+                acknowledged_subscription_ids,
+                message.received_at,
+                &message.payload,
+            )
+            .await?,
+            QueueOutcome::DataGap
+        ) {
+            return Err(TiingoError::WebSocketProtocol {
+                reason: "market-data queue overflowed while publishing an acknowledged update",
+            });
+        }
+    }
+    Ok(())
 }
 
 async fn queue_text_message(
@@ -759,9 +863,13 @@ fn redact_sensitive_value(
             }
         }
         Value::Number(number) => {
-            let encoded = number.to_string();
-            if redact_sensitive_text(&encoded, authorization, acknowledged_subscription_ids)
-                != encoded
+            if authorization.matches_number(number)
+                || acknowledged_subscription_ids.iter().any(|subscription_id| {
+                    matches!(
+                        subscription_id,
+                        SubscriptionId::Number(value) if json_number_matches_u64(number, *value)
+                    )
+                })
             {
                 *value = Value::String("[REDACTED]".into());
             }
@@ -781,9 +889,7 @@ fn redact_sensitive_text(
             SubscriptionId::Number(value) => value.to_string(),
             SubscriptionId::String(value) => value.clone(),
         };
-        if !secret.is_empty() {
-            redacted = redacted.replace(&secret, "[REDACTED]");
-        }
+        redacted = redact_bounded_secret(&redacted, &secret);
     }
     redacted
 }
@@ -791,64 +897,10 @@ fn redact_sensitive_text(
 fn remember_subscription_id(
     acknowledged_subscription_ids: &mut Vec<SubscriptionId>,
     subscription_id: &SubscriptionId,
-) -> bool {
+) {
     if !acknowledged_subscription_ids.contains(subscription_id) {
         acknowledged_subscription_ids.push(subscription_id.clone());
-        true
-    } else {
-        false
     }
-}
-
-async fn redact_retained_events(
-    session: &Session,
-    authorization: &Authorization,
-    acknowledged_subscription_ids: &[SubscriptionId],
-) -> Result<(), TiingoError> {
-    let mut data = session.data.lock().await;
-    let mut queue_bytes = 0_usize;
-    let mut exceeds_bounds = false;
-    for event in &mut data.events {
-        redact_sensitive_value(
-            &mut event.payload,
-            authorization,
-            acknowledged_subscription_ids,
-        );
-        event.vendor_timestamp = event.vendor_timestamp.as_deref().map(|timestamp| {
-            redact_sensitive_text(timestamp, authorization, acknowledged_subscription_ids)
-        });
-        event.symbol = event.symbol.as_deref().map(|symbol| {
-            redact_sensitive_text(symbol, authorization, acknowledged_subscription_ids)
-        });
-        let event_bytes = serde_json::to_vec(event)
-            .map_err(|_| TiingoError::WebSocketProtocol {
-                reason: "retained market event could not be encoded",
-            })?
-            .len();
-        let poll_bytes = serde_json::to_vec(&PollResult {
-            id: "0".repeat(32),
-            state: SubscriptionStatus::Reconnecting,
-            events: vec![event.clone()],
-        })
-        .map_err(|_| TiingoError::WebSocketProtocol {
-            reason: "retained market event could not be encoded",
-        })?
-        .len();
-        queue_bytes = queue_bytes.saturating_add(event_bytes);
-        exceeds_bounds |= poll_bytes > MAX_WEBSOCKET_POLL_BYTES;
-    }
-    exceeds_bounds |= queue_bytes > MAX_WEBSOCKET_QUEUE_BYTES;
-    if exceeds_bounds {
-        data.events.clear();
-        data.queue_bytes = 0;
-        drop(data);
-        set_status(session, SubscriptionStatus::DataGap).await;
-        return Err(TiingoError::WebSocketProtocol {
-            reason: "retained market data exceeded the bounded queue after redaction",
-        });
-    }
-    data.queue_bytes = queue_bytes;
-    Ok(())
 }
 
 fn message_identity(message: &ServerMessage) -> (Option<String>, Option<String>) {
@@ -873,9 +925,8 @@ fn message_identity(message: &ServerMessage) -> (Option<String>, Option<String>)
 async fn wait_for_update_ack(
     socket: &mut ClientSocket,
     codec: &ProtocolCodec,
-    authorization: &Authorization,
-    acknowledged_subscription_ids: &[SubscriptionId],
     session: &Session,
+    buffered_messages: &mut BufferedTextMessages,
     clock: &dyn ReceiveClock,
     last_liveness: &mut Instant,
 ) -> Result<SubscriptionId, TiingoError> {
@@ -893,39 +944,37 @@ async fn wait_for_update_ack(
             Message::Text(payload) => {
                 let received_at = clock.now();
                 let received = codec.decode(payload.as_bytes(), received_at)?;
+                let refresh_liveness = match &received.message {
+                    ServerMessage::Market(_) => true,
+                    ServerMessage::Raw(raw) => matches!(
+                        raw.message_type,
+                        RawMessageType::Update | RawMessageType::Delete
+                    ),
+                    ServerMessage::Information(_) | ServerMessage::Heartbeat(_) => false,
+                };
                 match received.message {
                     ServerMessage::Information(information) => {
                         return acknowledgement_result(information);
+                    }
+                    ServerMessage::Heartbeat(_) => {
+                        *last_liveness = Instant::now();
+                        continue;
                     }
                     ServerMessage::Raw(raw) if raw.message_type == RawMessageType::Error => {
                         if let Some(error) = classify_websocket_rejection(&raw.payload) {
                             return Err(error);
                         }
+                        return Err(TiingoError::WebSocketProtocol {
+                            reason: "server error message was not recognized",
+                        });
                     }
                     _ => {}
                 }
-                match queue_text_message(
-                    session,
-                    codec,
-                    authorization,
-                    acknowledged_subscription_ids,
-                    received_at,
-                    payload.as_bytes(),
-                )
-                .await?
-                {
-                    QueueOutcome::Continue {
-                        refresh_liveness: true,
-                    } => *last_liveness = Instant::now(),
-                    QueueOutcome::Continue {
-                        refresh_liveness: false,
-                    } => {}
-                    QueueOutcome::DataGap => {
-                        return Err(TiingoError::WebSocketProtocol {
-                            reason: "market-data queue overflowed while awaiting an update acknowledgement",
-                        });
-                    }
+                if refresh_liveness {
+                    *last_liveness = Instant::now();
                 }
+                buffer_text_message(session, buffered_messages, received_at, payload.as_bytes())
+                    .await?;
             }
             Message::Ping(payload) => {
                 socket

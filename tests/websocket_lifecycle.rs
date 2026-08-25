@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
-use serde_json::json;
+use serde_json::{Value, json};
 use tiingo_mcp::websocket::{
     protocol::Service,
     registry::{
@@ -74,6 +74,63 @@ impl ReconnectClock for ManualReconnectClock {
             let _ = released.await;
         })
     }
+}
+
+async fn poll_single_raw_event(subscription_id: Value, event: Value) -> MarketDataEvent {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": subscription_id},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send acknowledgement");
+        socket
+            .send(Message::text(event.to_string()))
+            .await
+            .expect("send raw market event");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+    let mut poll = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("raw market event is retained");
+    assert_eq!(poll.events.len(), 1);
+    let event = poll.events.remove(0);
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+    event
 }
 
 #[tokio::test]
@@ -703,6 +760,122 @@ async fn duplicate_and_older_observations_keep_arrival_order_and_are_flagged() {
             .map(|event| event.sequence)
             .collect::<Vec<_>>(),
         vec![1, 2, 3]
+    );
+
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+}
+
+#[tokio::test]
+async fn update_ack_keeps_published_replay_bytes_and_duplicate_classification_stable() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let (initial_polled, release_update) = tokio::sync::oneshot::channel();
+    let observation = json!({
+        "messageType": "A",
+        "service": "iex",
+        "data": ["2026-08-25T14:00:05Z", "AAPL", 105.0]
+    })
+    .to_string();
+    let server_observation = observation.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 4},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+        socket
+            .send(Message::text(server_observation.clone()))
+            .await
+            .expect("send initial observation");
+        release_update.await.expect("initial event was polled");
+        socket
+            .next()
+            .await
+            .expect("update command")
+            .expect("valid update command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 5},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send update acknowledgement");
+        socket
+            .send(Message::text(server_observation))
+            .await
+            .expect("send exact duplicate after acknowledgement");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+    let before = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("initial observation is poll-visible");
+    let before_bytes = serde_json::to_vec(&before.events[0]).expect("serialize initial event");
+    initial_polled
+        .send(())
+        .expect("release update after initial poll");
+    registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["MSFT".into()],
+                remove_symbols: Vec::new(),
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect("update succeeds");
+    let duplicate = registry
+        .poll(&started.id, before.events[0].sequence)
+        .await
+        .expect("duplicate observation is poll-visible");
+    let replay = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("original cursor replays");
+    let replay_bytes = serde_json::to_vec(&replay.events[0]).expect("serialize replayed event");
+
+    assert!(
+        replay_bytes == before_bytes && duplicate.events[0].duplicate,
+        "acknowledgement must not mutate replay bytes or stale duplicate truth; replay_stable={}, duplicate={}",
+        replay_bytes == before_bytes,
+        duplicate.events[0].duplicate
     );
 
     registry.shutdown().await;
@@ -2386,12 +2559,313 @@ async fn update_preserves_market_data_that_arrives_before_its_acknowledgement() 
 }
 
 #[tokio::test]
+async fn concurrent_poll_waits_for_update_ack_before_publishing_interleaved_data() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let (event_sent, interleaved_event_sent) = tokio::sync::oneshot::channel();
+    let (release_ack, ack_released) = tokio::sync::oneshot::channel();
+    let (second_update_seen, second_update_received) = tokio::sync::oneshot::channel();
+    let (release_second_ack, second_ack_released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "initial-upstream-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+        socket
+            .next()
+            .await
+            .expect("update command")
+            .expect("valid update command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "U",
+                    "futureId": "updated-upstream-secret",
+                    "nested": {
+                        "updated-upstream-secret": "updated-upstream-secret"
+                    }
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send interleaved event containing the future acknowledgement ID");
+        event_sent
+            .send(())
+            .expect("signal interleaved event was sent");
+        ack_released.await.expect("release update acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "updated-upstream-secret"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send update acknowledgement");
+        socket
+            .next()
+            .await
+            .expect("second update command")
+            .expect("valid second update command");
+        second_update_seen
+            .send(())
+            .expect("signal second update command was received");
+        second_ack_released
+            .await
+            .expect("release second update acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "final-upstream-id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send second update acknowledgement");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+    let update_registry = registry.clone();
+    let update_id = started.id.clone();
+    let update = tokio::spawn(async move {
+        update_registry
+            .update(
+                &update_id,
+                UpdateRequest {
+                    add_symbols: vec!["MSFT".into()],
+                    remove_symbols: vec!["AAPL".into()],
+                    threshold_level: None,
+                },
+            )
+            .await
+    });
+    interleaved_event_sent
+        .await
+        .expect("server sent interleaved event");
+    let poll_registry = registry.clone();
+    let poll_id = started.id.clone();
+    let mut poll = tokio::spawn(async move { poll_registry.poll(&poll_id, 0).await });
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut poll)
+            .await
+            .is_err(),
+        "interleaved data remains private until its acknowledgement ID is known"
+    );
+    release_ack
+        .send(())
+        .expect("release update acknowledgement");
+    second_update_received
+        .await
+        .expect("worker starts the second acknowledged mutation");
+    assert!(
+        !update.is_finished(),
+        "the update remains pending while its second acknowledgement is held"
+    );
+    let poll = tokio::time::timeout(Duration::from_secs(1), poll)
+        .await
+        .expect("poll returns while the update is still pending")
+        .expect("poll task joins")
+        .expect("poll succeeds after acknowledgement");
+    let serialized = serde_json::to_string(&poll).expect("serialize poll result");
+    assert_eq!(poll.events.len(), 1);
+    assert!(!serialized.contains("updated-upstream-secret"));
+    assert!(
+        !update.is_finished(),
+        "sanitized data is poll-visible before the full update completes"
+    );
+    release_second_ack
+        .send(())
+        .expect("release second update acknowledgement");
+    update
+        .await
+        .expect("update task joins")
+        .expect("update succeeds");
+
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+}
+
+#[tokio::test]
+async fn private_update_buffer_shares_the_queue_event_bound_without_dropping_prior_data() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let (prior_polled, release_update) = tokio::sync::oneshot::channel();
+    let (burst_sent, burst_finished) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "initial-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "U",
+                    "prior": "retained"
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send prior retained event");
+        release_update.await.expect("prior event was polled");
+        socket
+            .next()
+            .await
+            .expect("update command")
+            .expect("valid update command");
+        for index in 0..2048 {
+            if socket
+                .send(Message::text(
+                    json!({
+                        "messageType": "U",
+                        "buffered": index
+                    })
+                    .to_string(),
+                ))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        let _ = burst_sent.send(());
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                return true;
+            }
+        }
+        true
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+    let prior = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("prior event is poll-visible");
+    let prior_bytes = serde_json::to_vec(&prior.events[0]).expect("serialize prior event");
+    let prior_sequence = prior.events[0].sequence;
+    prior_polled.send(()).expect("release update burst");
+    let update_registry = registry.clone();
+    let update_id = started.id.clone();
+    let mut update = tokio::spawn(async move {
+        update_registry
+            .update(
+                &update_id,
+                UpdateRequest {
+                    add_symbols: vec!["MSFT".into()],
+                    remove_symbols: Vec::new(),
+                    threshold_level: None,
+                },
+            )
+            .await
+    });
+    let poll_registry = registry.clone();
+    let poll_id = started.id.clone();
+    let terminal_poll =
+        tokio::spawn(async move { poll_registry.poll(&poll_id, prior_sequence).await });
+    burst_finished.await.expect("server sent buffered burst");
+    let error = tokio::time::timeout(Duration::from_secs(1), &mut update)
+        .await
+        .expect("private buffer reaches data_gap without waiting for an acknowledgement")
+        .expect("update task joins")
+        .expect_err("private buffer overflow rejects the update");
+    assert_eq!(error.payload().kind, "websocket_protocol");
+    let first_terminal = terminal_poll
+        .await
+        .expect("terminal poll task joins")
+        .expect("concurrent terminal poll succeeds");
+    let replayed_terminal = registry
+        .poll(&started.id, prior_sequence)
+        .await
+        .expect("identical terminal cursor replays");
+    assert_eq!(first_terminal.state, SubscriptionStatus::DataGap);
+    assert_eq!(
+        serde_json::to_vec(&first_terminal).expect("serialize first terminal poll"),
+        serde_json::to_vec(&replayed_terminal).expect("serialize terminal replay")
+    );
+    let terminal = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("prior terminal queue remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::DataGap);
+    assert_eq!(terminal.events.len(), 1);
+    assert_eq!(
+        serde_json::to_vec(&terminal.events[0]).expect("serialize retained prior event"),
+        prior_bytes
+    );
+    assert!(server.await.expect("mock server exits after data gap"));
+    registry.shutdown().await;
+}
+
+#[tokio::test]
 async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
     let (update_seen, update_received) = tokio::sync::oneshot::channel();
+    let (messages_sent, messages_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept client");
         let mut socket = accept_async(stream).await.expect("WebSocket handshake");
@@ -2439,6 +2913,9 @@ async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
             ))
             .await
             .expect("send update acknowledgement");
+        messages_sent
+            .send(())
+            .expect("signal interleaved data and acknowledgement were sent");
         while let Some(message) = socket.next().await {
             if matches!(message, Ok(Message::Close(_))) {
                 return;
@@ -2483,10 +2960,15 @@ async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
             .await
     });
     update_received.await.expect("server sees update command");
+    messages_received
+        .await
+        .expect("server sends interleaved data and acknowledgement");
+    tokio::time::resume();
     let updated = update
         .await
         .expect("update task joins")
         .expect("update succeeds after interleaved data");
+    tokio::time::pause();
     assert_eq!(updated.symbols, vec!["AAPL", "MSFT"]);
     let poll = registry
         .poll(&started.id, 0)
@@ -2515,7 +2997,7 @@ async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
 }
 
 #[tokio::test]
-async fn transport_loss_during_update_reconnects_the_original_acknowledged_symbols() {
+async fn transport_loss_during_update_preserves_buffered_data_through_reconnect() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock WebSocket server");
@@ -2546,6 +3028,17 @@ async fn transport_loss_during_update_reconnects_the_original_acknowledged_symbo
             .await
             .expect("update command")
             .expect("valid update command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "U",
+                    "phase": "before disconnect",
+                    "value": 123
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send market data before transport loss");
         socket
             .send(Message::Close(None))
             .await
@@ -2634,9 +3127,15 @@ async fn transport_loss_during_update_reconnects_the_original_acknowledged_symbo
         .expect("transport failure enters reconnect promptly")
         .expect("worker requests reconnect delay");
     assert_eq!(delay, Duration::from_millis(250));
+    let buffered = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("pre-disconnect data is available during recovery");
+    assert_eq!(buffered.events.len(), 1);
+    assert_eq!(buffered.events[0].payload["phase"], "before disconnect");
     release.send(()).expect("release reconnect delay");
     let recovered = registry
-        .poll(&started.id, 0)
+        .poll(&started.id, buffered.events[0].sequence)
         .await
         .expect("post-reconnect data is available");
     assert_eq!(recovered.state, SubscriptionStatus::Active);
@@ -3212,6 +3711,59 @@ async fn retained_events_redact_numeric_acknowledged_upstream_ids() {
 }
 
 #[tokio::test]
+async fn string_upstream_id_redaction_preserves_adjacent_market_text() {
+    let event = poll_single_raw_event(
+        json!("ABC5"),
+        json!({
+            "messageType": "U",
+            "exact": "ABC5",
+            "bounded": "prefix-ABC5-suffix",
+            "adjacent": "XABC5Y",
+            "longerNumber": "ABC50",
+            "safeABC5value": "unchanged",
+            "prefix-ABC5-suffix": "redacted key"
+        }),
+    )
+    .await;
+
+    assert_eq!(event.payload["exact"], "[REDACTED]");
+    assert_eq!(event.payload["bounded"], "prefix-[REDACTED]-suffix");
+    assert_eq!(event.payload["adjacent"], "XABC5Y");
+    assert_eq!(event.payload["longerNumber"], "ABC50");
+    assert_eq!(event.payload["safeABC5value"], "unchanged");
+    assert_eq!(event.payload["prefix-[REDACTED]-suffix"], "redacted key");
+}
+
+#[tokio::test]
+async fn numeric_upstream_id_redaction_preserves_unrelated_market_values() {
+    let event = poll_single_raw_event(
+        json!(5),
+        json!({
+            "messageType": "U",
+            "exactInteger": 5,
+            "exactFloat": 5.0,
+            "marketInteger": 105,
+            "marketFloat": 105.5,
+            "timestamp": "2026-08-25T14:05:00Z",
+            "adjacentText": "105",
+            "boundedText": "subscription-5-active"
+        }),
+    )
+    .await;
+
+    assert_eq!(event.payload["exactInteger"], "[REDACTED]");
+    assert_eq!(event.payload["exactFloat"], "[REDACTED]");
+    assert_eq!(event.payload["marketInteger"], 105);
+    assert_eq!(event.payload["marketFloat"], 105.5);
+    assert_eq!(event.payload["timestamp"], "2026-08-25T14:05:00Z");
+    assert_eq!(event.payload["adjacentText"], "105");
+    assert_eq!(
+        event.payload["boundedText"],
+        "subscription-[REDACTED]-active"
+    );
+}
+
+#[tokio::test]
 async fn a_single_event_too_large_for_any_poll_response_is_terminal_data_gap() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -3402,6 +3954,175 @@ async fn exact_active_poll_limit_is_rejected_when_terminal_wrapper_would_exceed_
     assert_eq!(terminal.state, SubscriptionStatus::DataGap);
     assert!(terminal.events.is_empty());
     assert!(server.await.expect("mock server observes terminal close"));
+    registry.shutdown().await;
+}
+
+#[tokio::test]
+async fn redaction_growth_data_gap_preserves_prior_exact_cursor_replay() {
+    let received_at = DateTime::parse_from_rfc3339("2026-08-25T14:00:00Z")
+        .expect("fixed timestamp parses")
+        .with_timezone(&Utc);
+    let redacted_without_padding = MarketDataEvent {
+        sequence: 2,
+        received_at,
+        vendor_timestamp: None,
+        symbol: None,
+        duplicate: false,
+        out_of_order: false,
+        payload: json!({
+            "messageType": "U",
+            "upstream": "[REDACTED]",
+            "padding": ""
+        }),
+    };
+    let redacted_base_bytes = serde_json::to_vec(&PollResult {
+        id: "0".repeat(32),
+        state: SubscriptionStatus::Reconnecting,
+        events: vec![redacted_without_padding.clone()],
+    })
+    .expect("serialize redacted boundary fixture")
+    .len();
+    let padding = "x".repeat(1024 * 1024 + 1 - redacted_base_bytes);
+    let mut redacted_event = redacted_without_padding;
+    redacted_event.payload["padding"] = json!(padding.clone());
+    assert_eq!(
+        serde_json::to_vec(&PollResult {
+            id: "0".repeat(32),
+            state: SubscriptionStatus::Reconnecting,
+            events: vec![redacted_event.clone()],
+        })
+        .expect("serialize redacted over-bound fixture")
+        .len(),
+        1024 * 1024 + 1
+    );
+    let mut unredacted_event = redacted_event;
+    unredacted_event.payload["upstream"] = json!("id");
+    assert!(
+        serde_json::to_vec(&PollResult {
+            id: "0".repeat(32),
+            state: SubscriptionStatus::Reconnecting,
+            events: vec![unredacted_event],
+        })
+        .expect("serialize unredacted boundary fixture")
+        .len()
+            <= 1024 * 1024
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let (prior_polled, release_update) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "initial-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "U",
+                    "prior": "retained"
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send prior retained event");
+        release_update.await.expect("prior event was polled");
+        socket
+            .next()
+            .await
+            .expect("update command")
+            .expect("valid update command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "U",
+                    "upstream": "id",
+                    "padding": padding
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send exact-bound interleaved event");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send update acknowledgement");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                return true;
+            }
+        }
+        false
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector_and_clock(
+        Some("test-key".into()),
+        connector,
+        Arc::new(FixedClock(received_at)),
+    );
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+    let prior = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("prior event is poll-visible");
+    let prior_bytes = serde_json::to_vec(&prior.events[0]).expect("serialize prior event");
+    prior_polled.send(()).expect("release exact-bound update");
+    let error = registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["MSFT".into()],
+                remove_symbols: Vec::new(),
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect_err("redaction growth rejects the new event");
+    assert_eq!(error.payload().kind, "websocket_protocol");
+    let terminal = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("terminal queue remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::DataGap);
+    assert_eq!(terminal.events.len(), 1);
+    assert_eq!(
+        serde_json::to_vec(&terminal.events[0]).expect("serialize retained terminal event"),
+        prior_bytes
+    );
+    assert_eq!(terminal.events[0].payload["prior"], "retained");
+    assert!(server.await.expect("mock server exits after data gap"));
     registry.shutdown().await;
 }
 

@@ -2,7 +2,7 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 use crate::{
     config::{CONSOLIDATED_WEBSOCKET_URL, IEX_WEBSOCKET_URL, MAX_WEBSOCKET_MESSAGE_BYTES},
@@ -54,6 +54,58 @@ impl Authorization {
             value.replace(&self.0, "[REDACTED]")
         }
     }
+
+    pub(crate) fn matches_number(&self, number: &Number) -> bool {
+        self.0
+            .parse::<u64>()
+            .ok()
+            .is_some_and(|value| json_number_matches_u64(number, value))
+    }
+}
+
+pub(crate) fn redact_bounded_secret(value: &str, secret: &str) -> String {
+    if secret.is_empty() {
+        return value.to_owned();
+    }
+    let first_is_token = secret.chars().next().is_some_and(is_token_character);
+    let last_is_token = secret.chars().next_back().is_some_and(is_token_character);
+    let mut redacted = String::with_capacity(value.len());
+    let mut cursor = 0;
+    for (start, _) in value.match_indices(secret) {
+        if start < cursor {
+            continue;
+        }
+        let end = start + secret.len();
+        let before_is_token = value[..start]
+            .chars()
+            .next_back()
+            .is_some_and(is_token_character);
+        let after_is_token = value[end..].chars().next().is_some_and(is_token_character);
+        if (first_is_token && before_is_token) || (last_is_token && after_is_token) {
+            continue;
+        }
+        redacted.push_str(&value[cursor..start]);
+        redacted.push_str("[REDACTED]");
+        cursor = end;
+    }
+    if cursor == 0 {
+        value.to_owned()
+    } else {
+        redacted.push_str(&value[cursor..]);
+        redacted
+    }
+}
+
+pub(crate) fn json_number_matches_u64(number: &Number, value: u64) -> bool {
+    number.as_u64() == Some(value)
+        || (value <= (1_u64 << f64::MANTISSA_DIGITS)
+            && number
+                .as_f64()
+                .is_some_and(|candidate| candidate == value as f64))
+}
+
+fn is_token_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
 }
 
 impl fmt::Debug for Authorization {
