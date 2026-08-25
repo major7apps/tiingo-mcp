@@ -4563,9 +4563,10 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
     let (heartbeat_requests, mut requested_heartbeats) =
-        tokio::sync::mpsc::unbounded_channel::<tokio::sync::oneshot::Sender<()>>();
+        tokio::sync::mpsc::unbounded_channel::<(u8, tokio::sync::oneshot::Sender<()>)>();
     let (disconnect, disconnected) = tokio::sync::oneshot::channel();
     let (reconnect_seen, reconnect_received) = tokio::sync::oneshot::channel();
+    let (reconnect_closed, reconnect_closed_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept initial client");
         let mut socket = accept_async(stream)
@@ -4591,7 +4592,8 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         loop {
             tokio::select! {
                 heartbeat = requested_heartbeats.recv() => {
-                    let heartbeat = heartbeat.expect("heartbeat request channel remains open");
+                    let (cycle, heartbeat) =
+                        heartbeat.expect("heartbeat request channel remains open");
                     socket
                         .send(Message::text(
                             json!({
@@ -4602,7 +4604,28 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
                         ))
                         .await
                         .expect("send heartbeat");
-                    heartbeat.send(()).expect("record heartbeat send");
+                    let ping_payload = vec![cycle];
+                    socket
+                        .send(Message::Ping(ping_payload.clone().into()))
+                        .await
+                        .expect("send heartbeat processing barrier");
+                    loop {
+                        match socket.next().await {
+                            Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => {
+                                break;
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(error)) => {
+                                panic!("receive heartbeat processing barrier: {error}")
+                            }
+                            None => {
+                                panic!("heartbeat processing barrier socket remains open in cycle {cycle}")
+                            }
+                        }
+                    }
+                    heartbeat
+                        .send(())
+                        .expect("record processed heartbeat barrier");
                 }
                 _ = &mut disconnected => {
                     socket
@@ -4626,6 +4649,9 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
             .expect("valid fresh subscribe");
         reconnect_seen.send(()).expect("record reconnect subscribe");
         while socket.next().await.is_some() {}
+        reconnect_closed
+            .send(())
+            .expect("record reconnect socket close");
     });
     let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
         .expect("mock endpoint is valid");
@@ -4649,18 +4675,20 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .expect("subscription starts");
     tokio::time::pause();
 
-    for _ in 0..4 {
+    for cycle in 0..4_u8 {
         tokio::time::advance(Duration::from_secs(60)).await;
+        tokio::time::resume();
         let (heartbeat_sent, heartbeat_received) = tokio::sync::oneshot::channel();
         heartbeat_requests
-            .send(heartbeat_sent)
+            .send((cycle, heartbeat_sent))
             .expect("request heartbeat");
-        heartbeat_received.await.expect("server sends heartbeat");
-        for _ in 0..3 {
-            tokio::task::yield_now().await;
-        }
+        heartbeat_received
+            .await
+            .unwrap_or_else(|_| panic!("worker processes heartbeat in cycle {cycle}"));
+        tokio::time::pause();
     }
     tokio::time::advance(Duration::from_secs(58)).await;
+    tokio::time::resume();
     disconnect.send(()).expect("request disconnect");
     let (delay, release) = requested_delays
         .recv()
@@ -4668,44 +4696,21 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .expect("worker requests reconnect delay");
     assert_eq!(delay, Duration::from_millis(250));
     release.send(()).expect("release reconnect delay");
-    tokio::time::resume();
     reconnect_received
         .await
         .expect("fresh subscribe is sent before expiry");
 
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(2)).await;
-    for _ in 0..5 {
-        tokio::task::yield_now().await;
-    }
-    let poll_registry = registry.clone();
-    let poll_id = started.id.clone();
-    let poll = tokio::spawn(async move { poll_registry.poll(&poll_id, u64::MAX).await });
-    for _ in 0..5 {
-        tokio::task::yield_now().await;
-    }
-    let expired_at_deadline = poll.is_finished();
-    let terminal = if expired_at_deadline {
-        Some(
-            poll.await
-                .expect("poll task joins")
-                .expect("terminal state remains inspectable"),
-        )
-    } else {
-        poll.abort();
-        let _ = poll.await;
-        None
-    };
+    tokio::time::resume();
+    reconnect_closed_received
+        .await
+        .expect("absolute deadline closes reconnect before acknowledgement timeout");
+    let terminal = registry
+        .poll(&started.id, u64::MAX)
+        .await
+        .expect("terminal state remains inspectable");
     registry.shutdown().await;
     server.await.expect("mock server exits cleanly");
-    assert!(
-        expired_at_deadline,
-        "reconnect establishment observes session expiry before its ack timeout"
-    );
-    assert_eq!(
-        terminal
-            .expect("deadline produces a terminal snapshot")
-            .state,
-        SubscriptionStatus::Expired
-    );
+    assert_eq!(terminal.state, SubscriptionStatus::Expired);
 }
