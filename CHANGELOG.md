@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 (Unreleased)
+
+### Maintenance
+
+- Added weekly Dependabot version updates for Cargo and GitHub Actions.
+- Made `AGENTS.md` the harness-neutral repository guide while retaining `CLAUDE.md` as a symlink.
+
 ## 2.0.0 (2026-08-24)
 
 ### Breaking changes
