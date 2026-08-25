@@ -46,8 +46,19 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run offline tests
+      - name: Run offline tests on MSRV
+        if: matrix.rust == '1.88.0'
         run: cargo test --all-targets --locked
+
+      - name: Install coverage tooling
+        if: matrix.rust == 'stable'
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --version 0.9.0 --locked
+
+      - name: Run offline tests with coverage
+        if: matrix.rust == 'stable'
+        run: cargo llvm-cov --all-targets --all-features --locked --fail-under-lines 93
 
       - name: Build release binary
         run: cargo build --release --locked
