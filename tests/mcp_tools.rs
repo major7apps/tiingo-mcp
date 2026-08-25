@@ -463,7 +463,7 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
 ];
 
 #[tokio::test]
-async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
+async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() {
     let upstream = MockServer::start().await;
     let connection = Connection::new(test_client(&upstream, "test-key")).await;
 
@@ -474,8 +474,10 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
         .collect::<BTreeSet<_>>();
     let expected_names = TOOL_NAMES.into_iter().collect::<BTreeSet<_>>();
 
-    assert_eq!(tools.len(), TOOL_NAMES.len());
-    assert_eq!(actual_names, expected_names);
+    assert_eq!(tools.len(), TOOL_NAMES.len() + 2);
+    assert!(expected_names.is_subset(&actual_names));
+    assert!(actual_names.contains("get_bulk_eod_prices"));
+    assert!(actual_names.contains("get_ticker_metadata"));
 
     for tool in &tools {
         assert!(
@@ -566,6 +568,130 @@ async fn discovers_exactly_the_legacy_tools_with_typed_inputs() {
         serde_json::json!(["string", "null"])
     );
 
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_preserves_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let expected = serde_json::json!({
+        "prices": [{
+            "date": "2024-01-02",
+            "ticker": "AAPL",
+            "open": 100.0,
+            "high": 105.0,
+            "low": 99.0,
+            "close": 104.0,
+            "volume": 1000.0,
+            "adjOpen": 100.0,
+            "adjHigh": 105.0,
+            "adjLow": 99.0,
+            "adjClose": 104.0,
+            "adjVolume": 1000.0,
+            "divCash": 0.0,
+            "splitFactor": 1.0
+        }],
+        "historyRefreshTickers": []
+    });
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/prices"))
+        .and(query_param("format", "csv"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+            "date,ticker,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjClose,adjVolume,divCash,splitFactor\n",
+            "2024-01-02,AAPL,100,105,99,104,1000,100,105,99,104,1000,0,1\n"
+        )))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+
+    let tool = connection
+        .client
+        .list_tools(None)
+        .await
+        .unwrap()
+        .tools
+        .into_iter()
+        .find(|tool| tool.name == "get_bulk_eod_prices")
+        .expect("bulk EOD prices must be discoverable");
+    assert!(
+        tool.input_schema["properties"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(tool.input_schema["additionalProperties"], false);
+    let result = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("get_bulk_eod_prices")
+                .with_arguments(arguments(serde_json::json!({}))),
+        )
+        .await
+        .unwrap();
+
+    assert_accurate_success("get_bulk_eod_prices", &result, &expected);
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn ticker_metadata_requires_columns_and_preserves_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let expected = serde_json::json!([{
+        "ticker": "AAPL",
+        "permaTicker": "AAPL",
+        "openfigi": "BBG000B9XRY4"
+    }]);
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/meta"))
+        .and(query_param("columns", "ticker,permaTicker,openfigi"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(expected.clone()))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+
+    let tool = connection
+        .client
+        .list_tools(None)
+        .await
+        .unwrap()
+        .tools
+        .into_iter()
+        .find(|tool| tool.name == "get_ticker_metadata")
+        .expect("ticker metadata must be discoverable");
+    assert_eq!(
+        tool.input_schema["required"],
+        serde_json::json!(["columns"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["columns"]["type"],
+        serde_json::json!("array")
+    );
+    assert_eq!(tool.input_schema["additionalProperties"], false);
+
+    let missing = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("get_ticker_metadata")
+                .with_arguments(arguments(serde_json::json!({}))),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.is_error, Some(true));
+    assert!(upstream.received_requests().await.unwrap().is_empty());
+
+    let result = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("get_ticker_metadata").with_arguments(arguments(
+                serde_json::json!({"columns": ["ticker", "permaTicker", "openfigi"]}),
+            )),
+        )
+        .await
+        .unwrap();
+
+    assert_accurate_success("get_ticker_metadata", &result, &expected);
     connection.close().await;
 }
 

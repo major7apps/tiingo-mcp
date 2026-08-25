@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
 use reqwest::{
     Client, StatusCode,
@@ -46,6 +46,26 @@ impl TiingoClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, TiingoError> {
+        let body = self.get_bytes(capability, path, query).await?;
+        serde_json::from_slice(&body).map_err(|_| TiingoError::Decode { capability })
+    }
+
+    pub async fn get_csv(
+        &self,
+        capability: &'static str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<String, TiingoError> {
+        let body = self.get_bytes(capability, path, query).await?;
+        String::from_utf8(body.to_vec()).map_err(|_| TiingoError::Decode { capability })
+    }
+
+    async fn get_bytes(
+        &self,
+        capability: &'static str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Bytes, TiingoError> {
         let url = self
             .config
             .base_url
@@ -85,7 +105,7 @@ impl TiingoClient {
         headers: HeaderMap,
         query: &[(&str, String)],
         api_key: &str,
-    ) -> Result<Value, TiingoError> {
+    ) -> Result<Bytes, TiingoError> {
         let mut last_error = None;
         for attempt in 1..=self.config.retry.max_attempts {
             match self
@@ -127,7 +147,7 @@ impl TiingoClient {
         headers: HeaderMap,
         query: &[(&str, String)],
         api_key: &str,
-    ) -> Result<Value, AttemptFailure> {
+    ) -> Result<Bytes, AttemptFailure> {
         let response = self
             .http
             .get(url)
@@ -170,8 +190,7 @@ impl TiingoClient {
             }
             body.extend_from_slice(&chunk);
         }
-        serde_json::from_slice(&body)
-            .map_err(|_| AttemptFailure::terminal(TiingoError::Decode { capability }))
+        Ok(body.freeze())
     }
 }
 

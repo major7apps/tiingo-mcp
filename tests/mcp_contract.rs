@@ -207,6 +207,25 @@ fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
     tools
 }
 
+fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
+    let legacy_names = baseline["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    let legacy_tools = tools
+        .into_iter()
+        .filter(|tool| legacy_names.contains(tool["name"].as_str().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        legacy_tools.len(),
+        legacy_names.len(),
+        "legacy tools are missing"
+    );
+    legacy_tools
+}
+
 fn canonical_list(mut items: Vec<Value>, field: &str) -> Vec<Value> {
     sort_by_string_field(&mut items, field);
     items
@@ -494,7 +513,7 @@ async fn child_process_contract() -> anyhow::Result<()> {
     let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
-    assert_eq!(client.list_all_tools().await?.len(), 17);
+    assert_eq!(client.list_all_tools().await?.len(), 19);
     assert_eq!(client.list_all_resources().await?.len(), 3);
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);
@@ -509,7 +528,7 @@ async fn child_process_contract() -> anyhow::Result<()> {
         .unwrap()
         .clone();
     assert_eq!(
-        canonical_tools(actual_tools, false),
+        canonical_tools(legacy_tools(actual_tools, &baseline), false),
         canonical_tools(baseline["tools"].as_array().unwrap().clone(), true),
         "tool discovery drifted"
     );

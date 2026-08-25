@@ -33,6 +33,17 @@ pub struct StockPricesArgs {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("properties" = {}))]
+pub struct BulkEodPricesArgs {}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TickerMetadataArgs {
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RealtimePriceArgs {
     pub ticker: String,
     #[serde(default)]
@@ -298,6 +309,28 @@ impl TiingoServer {
                 )
                 .await,
         )
+    }
+
+    #[rmcp::tool(
+        description = "Get all available end-of-day prices for daily cache refresh. Returns raw and adjusted OHLCV plus historyRefreshTickers for cash dividends or splits.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_bulk_eod_prices(
+        &self,
+        Parameters(_args): Parameters<BulkEodPricesArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_bulk_eod_prices().await)
+    }
+
+    #[rmcp::tool(
+        description = "Get selected ticker lifecycle metadata. The vendor-supplied route is availability-dependent; a 404 means Tiingo did not make this route available for the current request.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_ticker_metadata(
+        &self,
+        Parameters(args): Parameters<TickerMetadataArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_ticker_metadata(&args.columns).await)
     }
 
     #[rmcp::tool(

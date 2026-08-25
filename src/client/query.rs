@@ -134,3 +134,30 @@ pub fn validate_path_segment(value: &str) -> Result<(), TiingoError> {
     }
     Ok(())
 }
+
+pub fn validate_ticker_metadata_columns(columns: &[String]) -> Result<(), TiingoError> {
+    if columns.is_empty() || columns.len() > 32 {
+        return Err(TiingoError::Validation(
+            "columns must contain between 1 and 32 ticker metadata fields".to_owned(),
+        ));
+    }
+    if columns.iter().any(|column| {
+        !matches!(
+            column.as_str(),
+            "ticker"
+                | "permaTicker"
+                | "name"
+                | "openfigi"
+                | "exchange"
+                | "assetType"
+                | "isActive"
+                | "startDate"
+                | "endDate"
+        )
+    }) {
+        return Err(TiingoError::Validation(
+            "columns contain an unsupported ticker metadata field".to_owned(),
+        ));
+    }
+    Ok(())
+}

@@ -127,6 +127,123 @@ async fn sends_token_authentication_and_only_supplied_query_values() {
 }
 
 #[tokio::test]
+async fn csv_requests_share_token_authentication_query_and_retry_behavior() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/prices"))
+        .and(header("authorization", "Token test-key"))
+        .and(query_param("format", "csv"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("busy"))
+        .up_to_n_times(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/prices"))
+        .and(header("authorization", "Token test-key"))
+        .and(query_param("format", "csv"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ticker,close\nAAPL,185.92\n"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(
+        Url::parse(&server.uri()).unwrap(),
+        Some("test-key"),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        client
+            .get_csv(
+                "bulk EOD prices",
+                "/tiingo/daily/prices",
+                &[("format", "csv".to_owned())],
+            )
+            .await
+            .unwrap(),
+        "ticker,close\nAAPL,185.92\n"
+    );
+}
+
+#[tokio::test]
+async fn csv_authentication_and_entitlement_errors_are_classified_and_redacted() {
+    for (status, expected) in [(401, "authentication"), (403, "entitlement")] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_string("Authorization: Token test-key; key=test-key"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(
+            Url::parse(&server.uri()).unwrap(),
+            Some("test-key"),
+        ))
+        .unwrap();
+
+        let error = client
+            .get_csv("bulk EOD prices", "/tiingo/daily/prices", &[])
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.payload().kind, expected);
+        assert!(!error.to_string().contains("test-key"));
+        assert!(!error.payload().message.contains("test-key"));
+    }
+}
+
+#[tokio::test]
+async fn csv_rejects_cross_origin_paths_before_contacting_another_server() {
+    let configured_server = MockServer::start().await;
+    let alternate_server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(
+        Url::parse(&configured_server.uri()).unwrap(),
+        Some("test-key"),
+    ))
+    .unwrap();
+
+    let error = client
+        .get_csv(
+            "bulk EOD prices",
+            &format!("{}/tiingo/daily/prices", alternate_server.uri()),
+            &[],
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, TiingoError::Validation(_)));
+    assert!(
+        alternate_server
+            .received_requests()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn csv_rejects_a_response_larger_than_eight_mebibytes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("x".repeat(8 * 1024 * 1024 + 1)))
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(
+        Url::parse(&server.uri()).unwrap(),
+        Some("test-key"),
+    ))
+    .unwrap();
+
+    let error = client
+        .get_csv("bulk EOD prices", "/tiingo/daily/prices", &[])
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, TiingoError::ResponseTooLarge { .. }));
+}
+
+#[tokio::test]
 async fn retries_503_up_to_a_third_successful_attempt() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
