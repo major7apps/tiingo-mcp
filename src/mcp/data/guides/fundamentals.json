@@ -4,12 +4,12 @@
     "as_of": "2026-08-24",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
-      "https://api.tiingo.com/documentation/end-of-day"
+      "https://www.tiingo.com/documentation/fundamentals"
     ],
     "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
   },
   "common_pitfalls": [
-    "Financial statements are reported quarterly; don't expect daily granularity.",
+    "Financial statements are reported quarterly and annually; don't expect daily granularity.",
     "get_daily_fundamentals returns many rows -- use start_date/end_date to limit results.",
     "get_company_meta accepts comma-separated tickers for batch lookups."
   ],

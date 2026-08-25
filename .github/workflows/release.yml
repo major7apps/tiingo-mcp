@@ -154,6 +154,7 @@ jobs:
         env:
           PUBLISHING: ${{ needs.plan.outputs.publishing }}
           RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        shell: bash
         run: |
           # Actually do builds and make zips and whatnot
           tag_args=()

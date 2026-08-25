@@ -10,6 +10,16 @@ const STRING_ARGUMENT_DESCRIPTION: &str =
     "Provide as a JSON string matching the following schema: {\"type\":\"string\"}";
 const BOOLEAN_ARGUMENT_DESCRIPTION: &str =
     "Provide as a JSON string matching the following schema: {\"type\":\"boolean\"}";
+const ANALYZE_STOCK_DESCRIPTION: &str =
+    "Comprehensive single-stock analysis: metadata, prices, fundamentals, and news";
+const COMPARE_STOCKS_DESCRIPTION: &str =
+    "Side-by-side comparison of two stocks: prices, fundamentals, and performance";
+const CRYPTO_MARKET_OVERVIEW_DESCRIPTION: &str =
+    "Crypto market snapshot: current prices, 24h changes, and 7-day trends";
+const EARNINGS_REPORT_ANALYSIS_DESCRIPTION: &str =
+    "Analyze a stock's earnings report: financials, price reaction, and news sentiment";
+const FOREX_PAIR_ANALYSIS_DESCRIPTION: &str =
+    "Currency pair analysis: current rate, historical trend, and volatility";
 
 fn argument(name: &str, description: &str, required: bool) -> PromptArgument {
     PromptArgument::new(name)
@@ -21,7 +31,7 @@ pub fn list() -> Vec<Prompt> {
     let mut prompts = vec![
         Prompt::new(
             "analyze-stock",
-            Some("Comprehensive single-stock analysis: metadata, prices, fundamentals, and news"),
+            Some(ANALYZE_STOCK_DESCRIPTION),
             Some(vec![
                 argument("ticker", STRING_ARGUMENT_DESCRIPTION, true),
                 argument("include_news", BOOLEAN_ARGUMENT_DESCRIPTION, false),
@@ -29,7 +39,7 @@ pub fn list() -> Vec<Prompt> {
         ),
         Prompt::new(
             "compare-stocks",
-            Some("Side-by-side comparison of two stocks: prices, fundamentals, and performance"),
+            Some(COMPARE_STOCKS_DESCRIPTION),
             Some(vec![
                 argument("ticker1", STRING_ARGUMENT_DESCRIPTION, true),
                 argument("ticker2", STRING_ARGUMENT_DESCRIPTION, true),
@@ -38,7 +48,7 @@ pub fn list() -> Vec<Prompt> {
         ),
         Prompt::new(
             "crypto-market-overview",
-            Some("Crypto market snapshot: current prices, 24h changes, and 7-day trends"),
+            Some(CRYPTO_MARKET_OVERVIEW_DESCRIPTION),
             Some(vec![argument(
                 "tickers",
                 STRING_ARGUMENT_DESCRIPTION,
@@ -47,9 +57,7 @@ pub fn list() -> Vec<Prompt> {
         ),
         Prompt::new(
             "earnings-report-analysis",
-            Some(
-                "Analyze a stock's earnings report: financials, price reaction, and news sentiment",
-            ),
+            Some(EARNINGS_REPORT_ANALYSIS_DESCRIPTION),
             Some(vec![
                 argument("ticker", STRING_ARGUMENT_DESCRIPTION, true),
                 argument("earnings_date", STRING_ARGUMENT_DESCRIPTION, true),
@@ -57,7 +65,7 @@ pub fn list() -> Vec<Prompt> {
         ),
         Prompt::new(
             "forex-pair-analysis",
-            Some("Currency pair analysis: current rate, historical trend, and volatility"),
+            Some(FOREX_PAIR_ANALYSIS_DESCRIPTION),
             Some(vec![
                 argument("pair", STRING_ARGUMENT_DESCRIPTION, true),
                 argument("period", STRING_ARGUMENT_DESCRIPTION, false),
@@ -130,7 +138,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
                 "5. Skip news fetching because include_news is false.\n".to_owned()
             };
             (
-                "Comprehensive single-stock analysis: metadata, prices, fundamentals, and news",
+                ANALYZE_STOCK_DESCRIPTION,
                 format!(
                     "Please perform a comprehensive analysis of {ticker} using the following steps:\n\n\
                  1. Call get_stock_metadata for {ticker} to retrieve company name, exchange, description, and available date range.\n\
@@ -152,7 +160,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
             let ticker2 = required_string(&arguments, "ticker2")?;
             let period = optional_string(&arguments, "period", "3 months")?;
             (
-                "Side-by-side comparison of two stocks: prices, fundamentals, and performance",
+                COMPARE_STOCKS_DESCRIPTION,
                 format!(
                     "Please perform a side-by-side comparison of {ticker1} and {ticker2} over the past {period}.\n\n\
                  Fetch the following data for each ticker:\n\
@@ -171,7 +179,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
         "crypto-market-overview" => {
             let tickers = optional_string(&arguments, "tickers", "btcusd,ethusd,solusd")?;
             (
-                "Crypto market snapshot: current prices, 24h changes, and 7-day trends",
+                CRYPTO_MARKET_OVERVIEW_DESCRIPTION,
                 format!(
                     "Please provide a crypto market overview for the following tickers: {tickers}.\n\n\
                  Fetch the following data:\n\
@@ -189,7 +197,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
             let ticker = required_string(&arguments, "ticker")?;
             let earnings_date = required_string(&arguments, "earnings_date")?;
             (
-                "Analyze a stock's earnings report: financials, price reaction, and news sentiment",
+                EARNINGS_REPORT_ANALYSIS_DESCRIPTION,
                 format!(
                     "Please analyze the earnings report for {ticker} around the date {earnings_date}.\n\n\
                  Fetch the following data:\n\
@@ -209,7 +217,7 @@ pub fn get(request: GetPromptRequestParams) -> Result<GetPromptResult, ErrorData
             let pair = required_string(&arguments, "pair")?;
             let period = optional_string(&arguments, "period", "1 month")?;
             (
-                "Currency pair analysis: current rate, historical trend, and volatility",
+                FOREX_PAIR_ANALYSIS_DESCRIPTION,
                 format!(
                     "Please perform a currency pair analysis for {pair} over the past {period}.\n\n\
                  Fetch the following data:\n\

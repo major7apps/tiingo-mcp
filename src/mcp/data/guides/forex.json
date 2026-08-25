@@ -4,7 +4,7 @@
     "as_of": "2026-08-24",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
-      "https://api.tiingo.com/documentation/end-of-day"
+      "https://www.tiingo.com/documentation/forex"
     ],
     "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
   },

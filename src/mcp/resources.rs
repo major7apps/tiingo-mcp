@@ -55,15 +55,20 @@ pub fn templates() -> Vec<ResourceTemplate> {
 
 pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
     let json = match uri {
-        "tiingo://capabilities" => CAPABILITIES,
-        "tiingo://fundamentals/definitions" => DEFINITIONS,
-        "tiingo://guide/date-formats" => DATE_FORMATS,
-        "tiingo://guide/corporate-actions" => GUIDE_CORPORATE_ACTIONS,
-        "tiingo://guide/crypto" => GUIDE_CRYPTO,
-        "tiingo://guide/forex" => GUIDE_FOREX,
-        "tiingo://guide/fundamentals" => GUIDE_FUNDAMENTALS,
-        "tiingo://guide/news" => GUIDE_NEWS,
-        "tiingo://guide/stocks" => GUIDE_STOCKS,
+        "tiingo://capabilities" => {
+            let mut value: serde_json::Value = serde_json::from_str(CAPABILITIES)
+                .expect("embedded capabilities JSON must be valid");
+            value["server_version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+            serde_json::to_string(&value).expect("capabilities JSON must serialize")
+        }
+        "tiingo://fundamentals/definitions" => DEFINITIONS.to_owned(),
+        "tiingo://guide/date-formats" => DATE_FORMATS.to_owned(),
+        "tiingo://guide/corporate-actions" => GUIDE_CORPORATE_ACTIONS.to_owned(),
+        "tiingo://guide/crypto" => GUIDE_CRYPTO.to_owned(),
+        "tiingo://guide/forex" => GUIDE_FOREX.to_owned(),
+        "tiingo://guide/fundamentals" => GUIDE_FUNDAMENTALS.to_owned(),
+        "tiingo://guide/news" => GUIDE_NEWS.to_owned(),
+        "tiingo://guide/stocks" => GUIDE_STOCKS.to_owned(),
         value if value.starts_with("tiingo://guide/") => {
             let name = &value["tiingo://guide/".len()..];
             let error = serde_json::json!({

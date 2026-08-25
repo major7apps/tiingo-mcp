@@ -66,7 +66,7 @@ Add the server to your MCP client's configuration:
 For Claude Code, the equivalent command is:
 
 ```bash
-claude mcp add tiingo -- tiingo-mcp
+claude mcp add tiingo --env TIINGO_API_KEY=your-api-key-here -- tiingo-mcp
 ```
 
 You can also launch the server directly:

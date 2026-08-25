@@ -144,10 +144,27 @@ async fn advertises_and_reads_corrected_legacy_resources() {
             panic!("guide must return text content");
         };
         assert_eq!(mime_type.as_deref(), Some("application/json"));
-        assert!(
-            json_text(&result).is_object(),
-            "{asset_class} must return JSON"
-        );
+        let guide = json_text(&result);
+        assert!(guide.is_object(), "{asset_class} must return JSON");
+        let endpoint_documentation = match asset_class {
+            "crypto" => Some("https://www.tiingo.com/documentation/crypto"),
+            "forex" => Some("https://www.tiingo.com/documentation/forex"),
+            "fundamentals" => Some("https://www.tiingo.com/documentation/fundamentals"),
+            "news" => Some("https://www.tiingo.com/documentation/news"),
+            _ => None,
+        };
+        if let Some(endpoint_documentation) = endpoint_documentation {
+            assert_eq!(
+                guide["availability"]["official_sources"][1], endpoint_documentation,
+                "{asset_class} must link to its matching Tiingo documentation"
+            );
+        }
+        if asset_class == "fundamentals" {
+            assert_eq!(
+                guide["common_pitfalls"][0],
+                "Financial statements are reported quarterly and annually; don't expect daily granularity."
+            );
+        }
     }
 
     let invalid = connection

@@ -9,7 +9,7 @@ use rmcp::{
 use serde_json::{Map, Value};
 use tiingo_mcp::{
     client::TiingoClient,
-    config::{Config, RetryPolicy},
+    config::{Config, MAX_RESPONSE_BYTES, RetryPolicy},
 };
 use tokio::process::Command;
 use url::Url;
@@ -319,12 +319,31 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
                 "plan_restrictions",
                 Value::String(old_restriction.to_owned()),
             );
+            let official_sources = match uri {
+                "tiingo://guide/crypto" => serde_json::json!([
+                    OFFICIAL_SOURCES[0],
+                    "https://www.tiingo.com/documentation/crypto"
+                ]),
+                "tiingo://guide/forex" => serde_json::json!([
+                    OFFICIAL_SOURCES[0],
+                    "https://www.tiingo.com/documentation/forex"
+                ]),
+                "tiingo://guide/fundamentals" => serde_json::json!([
+                    OFFICIAL_SOURCES[0],
+                    "https://www.tiingo.com/documentation/fundamentals"
+                ]),
+                "tiingo://guide/news" => serde_json::json!([
+                    OFFICIAL_SOURCES[0],
+                    "https://www.tiingo.com/documentation/news"
+                ]),
+                _ => serde_json::json!(OFFICIAL_SOURCES),
+            };
             insert_delta(
                 object,
                 "availability",
                 serde_json::json!({
                     "as_of": SOURCE_DATE,
-                    "official_sources": OFFICIAL_SOURCES,
+                    "official_sources": official_sources,
                     "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
                 }),
             );
@@ -343,6 +362,18 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
                     object,
                     "current_price_route",
                     Value::String("/tiingo/crypto/prices".to_owned()),
+                );
+            } else if uri == "tiingo://guide/fundamentals" {
+                let pitfalls = object["common_pitfalls"].as_array_mut().unwrap();
+                assert_eq!(
+                    pitfalls.first(),
+                    Some(&serde_json::json!(
+                        "Financial statements are reported quarterly; don't expect daily granularity."
+                    )),
+                    "frozen fundamentals cadence pitfall changed"
+                );
+                pitfalls[0] = serde_json::json!(
+                    "Financial statements are reported quarterly and annually; don't expect daily granularity."
                 );
             } else if uri == "tiingo://guide/stocks" {
                 replace_exact(
@@ -617,7 +648,7 @@ async fn approved_crypto_route_and_bounded_retry_delta_are_explicit() -> anyhow:
         base_url: Url::parse(&upstream.uri())?,
         request_timeout: Duration::from_secs(1),
         retry: RetryPolicy::test(),
-        max_response_bytes: 8 * 1024 * 1024,
+        max_response_bytes: MAX_RESPONSE_BYTES,
     })?;
     assert_eq!(
         client.get_crypto_quote(Some("btcusd")).await?,
@@ -760,6 +791,12 @@ fn every_approved_delta_rejects_mutated_frozen_values() {
     crypto["current_price_route"] = Value::String("/mutated".to_owned());
     assert_transform_rejects("crypto current route", move || {
         expected_resource_body("tiingo://guide/crypto", crypto);
+    });
+
+    let mut fundamentals = frozen_resource_body(&baseline, "tiingo://guide/fundamentals");
+    fundamentals["common_pitfalls"][0] = Value::String("mutated".to_owned());
+    assert_transform_rejects("fundamentals cadence", move || {
+        expected_resource_body("tiingo://guide/fundamentals", fundamentals);
     });
 
     let mut stocks = frozen_resource_body(&baseline, "tiingo://guide/stocks");

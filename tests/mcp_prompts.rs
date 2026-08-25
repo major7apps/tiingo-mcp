@@ -163,6 +163,10 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         .await
         .unwrap();
     let analyze_text = text(&analyze);
+    assert_eq!(
+        analyze.description.as_deref(),
+        Some(EXPECTED_PROMPTS[0].description)
+    );
     assert!(analyze_text.contains("get_news with tickers=AAPL"));
     assert!(analyze_text.contains("identify reported catalysts and market-moving events"));
     assert!(analyze_text.contains(
@@ -195,6 +199,10 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        compare.description.as_deref(),
+        Some(EXPECTED_PROMPTS[1].description)
+    );
     assert!(text(&compare).contains("past 3 months"));
 
     let crypto = connection
@@ -202,6 +210,10 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         .get_prompt(GetPromptRequestParams::new("crypto-market-overview"))
         .await
         .unwrap();
+    assert_eq!(
+        crypto.description.as_deref(),
+        Some(EXPECTED_PROMPTS[2].description)
+    );
     assert!(text(&crypto).contains("btcusd,ethusd,solusd"));
 
     let earnings = connection
@@ -213,6 +225,10 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        earnings.description.as_deref(),
+        Some(EXPECTED_PROMPTS[3].description)
+    );
     let earnings_text = text(&earnings).to_lowercase();
     assert!(!earnings_text.contains("based on trends"));
     assert!(earnings_text.contains("explicit consensus comparison"));
@@ -225,6 +241,10 @@ async fn serves_defaults_and_corrected_prompt_guidance() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        forex.description.as_deref(),
+        Some(EXPECTED_PROMPTS[4].description)
+    );
     let forex_text = text(&forex);
     assert!(forex_text.contains("past 1 month"));
     assert!(forex_text.contains("price history alone cannot establish their cause"));
