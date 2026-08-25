@@ -29,6 +29,27 @@ struct BulkEodPrice {
     split_factor: f64,
 }
 
+impl BulkEodPrice {
+    fn has_only_finite_financial_fields(&self) -> bool {
+        [
+            self.open,
+            self.high,
+            self.low,
+            self.close,
+            self.volume,
+            self.adj_open,
+            self.adj_high,
+            self.adj_low,
+            self.adj_close,
+            self.adj_volume,
+            self.div_cash,
+            self.split_factor,
+        ]
+        .into_iter()
+        .all(f64::is_finite)
+    }
+}
+
 impl TiingoClient {
     pub async fn get_stock_metadata(&self, ticker: &str) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
@@ -99,6 +120,11 @@ impl TiingoClient {
             let price = row.map_err(|_| TiingoError::Decode {
                 capability: "bulk EOD prices",
             })?;
+            if !price.has_only_finite_financial_fields() {
+                return Err(TiingoError::Decode {
+                    capability: "bulk EOD prices",
+                });
+            }
             if price.split_factor != 1.0 || price.div_cash > 0.0 {
                 history_refresh_tickers.push(price.ticker.clone());
             }

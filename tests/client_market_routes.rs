@@ -312,6 +312,65 @@ async fn bulk_eod_prices_reject_malformed_numeric_csv_fields() {
 }
 
 #[tokio::test]
+async fn bulk_eod_prices_reject_every_non_finite_financial_field() {
+    let headers = [
+        "date",
+        "ticker",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "adjOpen",
+        "adjHigh",
+        "adjLow",
+        "adjClose",
+        "adjVolume",
+        "divCash",
+        "splitFactor",
+    ];
+    for (field, value) in [
+        ("open", "NaN"),
+        ("high", "inf"),
+        ("low", "-inf"),
+        ("close", "1e9999"),
+        ("volume", "NaN"),
+        ("adjOpen", "inf"),
+        ("adjHigh", "-inf"),
+        ("adjLow", "1e9999"),
+        ("adjClose", "NaN"),
+        ("adjVolume", "inf"),
+        ("divCash", "-inf"),
+        ("splitFactor", "1e9999"),
+    ] {
+        let server = MockServer::start().await;
+        let mut row = vec!["1"; headers.len()];
+        row[0] = "2024-01-02";
+        row[1] = "AAPL";
+        row[12] = "0";
+        row[13] = "1";
+        row[headers.iter().position(|header| *header == field).unwrap()] = value;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "{}\n{}\n",
+                headers.join(","),
+                row.join(",")
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+        let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+        assert!(
+            matches!(error, TiingoError::Decode { .. }),
+            "{field}={value} was accepted"
+        );
+    }
+}
+
+#[tokio::test]
 async fn bulk_eod_prices_reject_csv_without_the_required_headers() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
