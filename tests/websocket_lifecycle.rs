@@ -4680,6 +4680,9 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
     const FINAL_EXPIRY_SECONDS: u64 = 2;
     const ABSOLUTE_LIFETIME_SECONDS: u64 = 1_800;
     const IDLE_LIFETIME_SECONDS: u64 = 300;
+    const ACK_TIMEOUT_SECONDS: u64 = 5;
+    const MAX_RECONNECT_SETUP_SECONDS: u64 = 1;
+    const DIRECT_EXPIRY_CLOSE_BOUND_SECONDS: u64 = 1;
     let virtual_elapsed_seconds = u64::from(HEARTBEAT_CYCLES) * HEARTBEAT_INTERVAL_SECONDS
         + PRE_RECONNECT_SECONDS
         + FINAL_EXPIRY_SECONDS;
@@ -4722,7 +4725,6 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         earliest_idle_deadline_seconds > ABSOLUTE_LIFETIME_SECONDS,
         "the refreshed idle deadline must remain after absolute expiry"
     );
-
     tokio::time::advance(Duration::from_secs(PRE_RECONNECT_SECONDS)).await;
     tokio::time::resume();
     disconnect.send(()).expect("request disconnect");
@@ -4731,17 +4733,31 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
         .await
         .expect("worker requests reconnect delay");
     assert_eq!(delay, Duration::from_millis(250));
+    let reconnect_released_at = tokio::time::Instant::now();
     release.send(()).expect("release reconnect delay");
     reconnect_received
         .await
         .expect("fresh subscribe is sent before expiry");
 
     tokio::time::pause();
+    let reconnect_setup_elapsed = tokio::time::Instant::now() - reconnect_released_at;
+    assert!(
+        reconnect_setup_elapsed < Duration::from_secs(MAX_RECONNECT_SETUP_SECONDS),
+        "local reconnect setup preserves the reviewed acknowledgement-timeout margin"
+    );
+    let minimum_ack_remaining_at_expiry =
+        ACK_TIMEOUT_SECONDS - MAX_RECONNECT_SETUP_SECONDS - FINAL_EXPIRY_SECONDS;
+    assert_eq!(minimum_ack_remaining_at_expiry, 2);
+    assert!(DIRECT_EXPIRY_CLOSE_BOUND_SECONDS < minimum_ack_remaining_at_expiry);
     tokio::time::advance(Duration::from_secs(FINAL_EXPIRY_SECONDS)).await;
     tokio::time::resume();
-    reconnect_closed_received
-        .await
-        .expect("absolute deadline closes reconnect before acknowledgement timeout");
+    tokio::time::timeout(
+        Duration::from_secs(DIRECT_EXPIRY_CLOSE_BOUND_SECONDS),
+        reconnect_closed_received,
+    )
+    .await
+    .expect("absolute deadline closes reconnect before the acknowledgement fallback window")
+    .expect("reconnect close signal remains available");
     let terminal = registry
         .poll(&started.id, u64::MAX)
         .await
