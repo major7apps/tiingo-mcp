@@ -142,7 +142,7 @@ jobs:
         run: tar -czf target/distrib/tiingo-mcp-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ${{ matrix.executable }}
 
       - name: Upload native archive and MCPB bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tiingo-mcp-${{ matrix.target }}
           path: |
