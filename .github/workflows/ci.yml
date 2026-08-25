@@ -20,7 +20,7 @@ jobs:
         rust: ["1.88.0", stable]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -84,7 +84,7 @@ jobs:
             executable: tiingo-mcp.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
