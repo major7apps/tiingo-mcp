@@ -60,11 +60,10 @@ This is a native RMCP stdio server wrapping the Tiingo financial-data REST API.
 
 - `tests/client_http.rs` covers authentication, validation, retries, redaction, origin safety, and response bounds.
 - `tests/client_market_routes.rs` and `tests/client_data_routes.rs` cover exact REST paths and query mappings.
-- `tests/mcp_contract.rs` compares discovery against `tests/contract/baseline/python-mcp.json`, the historical v1 parity oracle, plus only the approved correctness deltas.
+- `tests/mcp_contract.rs` compares discovery against `tests/contract/baseline/v1-mcp.json`, the frozen v1 parity oracle, plus only the approved correctness deltas.
 - `tests/mcp_tools.rs`, `tests/mcp_resources.rs`, and `tests/mcp_prompts.rs` cover the RMCP surface.
 - `tests/stdio_process.rs` covers negotiation, stdout purity, CLI behavior, and EOF shutdown in a child process.
 - `tests/live_smoke.rs` keeps offline validators enabled and the quota-consuming live test ignored by default.
-- `examples/migration_probe.rs` contains the reproducible startup, process-tree RSS, and wrapper-latency probe.
 
 ## Distribution
 
