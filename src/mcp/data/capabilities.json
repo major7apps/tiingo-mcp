@@ -1,0 +1,36 @@
+{
+  "as_of": "2026-08-24",
+  "asset_classes": {
+    "crypto": {
+      "data_types": [
+        "realtime_quote",
+        "historical_prices",
+        "metadata"
+      ],
+      "description": "Cryptocurrencies across exchanges"
+    },
+    "forex": {
+      "data_types": [
+        "realtime_quote",
+        "historical_prices"
+      ],
+      "description": "Foreign exchange currency pairs"
+    },
+    "stocks": {
+      "data_types": [
+        "eod_prices",
+        "intraday_prices",
+        "realtime_quote",
+        "metadata"
+      ],
+      "description": "US and international equities"
+    }
+  },
+  "entitlements_change_over_time": true,
+  "official_sources": [
+    "https://www.tiingo.com/documentation/general/overview",
+    "https://api.tiingo.com/documentation/end-of-day"
+  ],
+  "server_name": "Tiingo MCP Server",
+  "tool_count": 17
+}

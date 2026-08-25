@@ -1,0 +1,26 @@
+{
+  "asset_class": "forex",
+  "availability": {
+    "as_of": "2026-08-24",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://www.tiingo.com/documentation/forex"
+    ],
+    "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Tickers must be lowercase (eurusd, not EURUSD).",
+    "Forex market is 24/5 -- weekends have no data.",
+    "resample_freq '1day' is distinct from EOD stock resampling."
+  ],
+  "description": "Foreign exchange currency pairs with real-time quotes and historical prices.",
+  "ticker_format": "Lowercase concatenated pair, e.g. eurusd, gbpusd, usdjpy",
+  "tools": [
+    "get_forex_quote",
+    "get_forex_prices"
+  ],
+  "workflows": [
+    "Use get_forex_quote for the current top-of-book bid/ask for a pair.",
+    "Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling."
+  ]
+}

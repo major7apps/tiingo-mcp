@@ -6,49 +6,146 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  rust:
+    name: Rust ${{ matrix.rust }}
+    runs-on: ubuntu-24.04
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        rust: ["1.88.0", stable]
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Install Rust ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Show active Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
 
-      - name: Install dependencies
-        run: uv sync
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
 
-      - name: Lint
-        run: uv run ruff check src/ tests/
+      - name: Check formatting
+        if: matrix.rust == 'stable'
+        run: cargo fmt --check
 
-      - name: Format check
-        run: uv run ruff format --check src/ tests/
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Unit tests
-        run: uv run pytest tests/test_client.py tests/test_server.py -v
+      - name: Run offline tests
+        run: cargo test --all-targets --locked
 
-  publish:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      id-token: write
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Install cargo-deny
+        if: matrix.rust == 'stable'
+        run: cargo install cargo-deny --version 0.20.2 --locked
+
+      - name: Audit dependencies, licenses, and sources
+        if: matrix.rust == 'stable'
+        run: cargo deny check
+
+  native-artifact:
+    name: Native artifact (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            executable: tiingo-mcp
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            executable: tiingo-mcp
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            executable: tiingo-mcp
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            executable: tiingo-mcp
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            executable: tiingo-mcp.exe
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Install Rust 1.88.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          targets: ${{ matrix.target }}
 
-      - name: Build
-        run: uv build
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Publish to PyPI
-        run: uv publish --trusted-publishing always
+      - name: Install Zig 0.14.1
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Install cargo-zigbuild 0.23.2
+        if: runner.os == 'Linux'
+        run: cargo install cargo-zigbuild --version 0.23.2 --locked
+
+      - name: Build Linux artifact
+        if: runner.os == 'Linux'
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+
+      - name: Build native artifact
+        if: runner.os != 'Linux'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Run version check
+        shell: bash
+        run: target/${{ matrix.target }}/release/${{ matrix.executable }} --version
+
+      - name: Build MCPB 0.3 bundle
+        shell: bash
+        run: bash packaging/mcpb/package.sh ${{ matrix.target }} target/${{ matrix.target }}/release
+
+      - name: Validate staged MCPB manifest with CLI 2.1.2
+        shell: bash
+        run: |
+          test "$(jq -r '.server.entry_point' target/mcpb/${{ matrix.target }}/manifest.json)" = "server/${{ matrix.executable }}"
+          crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tiingo-mcp") | .version')"
+          test "$(jq -r '.version' target/mcpb/${{ matrix.target }}/manifest.json)" = "$crate_version"
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate target/mcpb/${{ matrix.target }}/manifest.json
+
+      - name: Inspect MCPB archive with CLI 2.1.2
+        shell: bash
+        run: npx --yes @anthropic-ai/mcpb@2.1.2 info target/distrib/tiingo-mcp-${{ matrix.target }}.mcpb
+
+      - name: Archive native binary
+        shell: bash
+        run: tar -czf target/distrib/tiingo-mcp-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ${{ matrix.executable }}
+
+      - name: Upload native archive and MCPB bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiingo-mcp-${{ matrix.target }}
+          path: |
+            target/distrib/tiingo-mcp-${{ matrix.target }}.tar.gz
+            target/distrib/tiingo-mcp-${{ matrix.target }}.mcpb
+          if-no-files-found: error

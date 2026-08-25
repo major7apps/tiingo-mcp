@@ -1,0 +1,105 @@
+{
+  "description": "Curated reference of common Tiingo fundamental metrics. Use get_fundamentals_definitions tool to fetch the full live list from the API.",
+  "metrics": [
+    {
+      "description": "Market capitalisation (shares outstanding x price)",
+      "name": "marketCap",
+      "statement_type": "overview"
+    },
+    {
+      "description": "Price-to-earnings ratio (price / trailing EPS)",
+      "name": "peRatio",
+      "statement_type": "overview"
+    },
+    {
+      "description": "Price-to-book ratio (price / book value per share)",
+      "name": "pbRatio",
+      "statement_type": "overview"
+    },
+    {
+      "description": "Trailing PEG ratio over 1 year (P/E / earnings growth rate)",
+      "name": "trailingPEG1Y",
+      "statement_type": "overview"
+    },
+    {
+      "description": "Total revenue (net sales)",
+      "name": "revenue",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Cost of revenue (cost of goods sold)",
+      "name": "costRev",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Gross profit (revenue - cost of revenue)",
+      "name": "grossProfit",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Operating income (EBIT before interest and taxes)",
+      "name": "operatingIncome",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Net income attributable to common shareholders",
+      "name": "netIncome",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Basic earnings per share",
+      "name": "eps",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Diluted earnings per share",
+      "name": "epsDil",
+      "statement_type": "income_statement"
+    },
+    {
+      "description": "Total assets",
+      "name": "totalAssets",
+      "statement_type": "balance_sheet"
+    },
+    {
+      "description": "Total liabilities",
+      "name": "totalLiabilities",
+      "statement_type": "balance_sheet"
+    },
+    {
+      "description": "Total shareholders equity",
+      "name": "totalEquity",
+      "statement_type": "balance_sheet"
+    },
+    {
+      "description": "Total debt (short-term + long-term borrowings)",
+      "name": "totalDebt",
+      "statement_type": "balance_sheet"
+    },
+    {
+      "description": "Cash and cash equivalents",
+      "name": "totalCash",
+      "statement_type": "balance_sheet"
+    },
+    {
+      "description": "Net cash from operating activities",
+      "name": "operatingCashFlow",
+      "statement_type": "cash_flow"
+    },
+    {
+      "description": "Net cash from investing activities",
+      "name": "investingCashFlow",
+      "statement_type": "cash_flow"
+    },
+    {
+      "description": "Net cash from financing activities",
+      "name": "financingCashFlow",
+      "statement_type": "cash_flow"
+    },
+    {
+      "description": "Free cash flow (operating cash flow - capital expenditures)",
+      "name": "freeCashFlow",
+      "statement_type": "cash_flow"
+    }
+  ]
+}

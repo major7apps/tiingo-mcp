@@ -1,0 +1,49 @@
+{
+  "corporate_actions_date_params": {
+    "dividend_yield": {
+      "end_date_maps_to": "endDate",
+      "start_date_maps_to": "startDate"
+    },
+    "dividends_and_splits": {
+      "end_date_maps_to": "endExDate",
+      "start_date_maps_to": "startExDate"
+    },
+    "note": "Dividends and splits filter by ex-date; dividend_yield filters by calendar date."
+  },
+  "date_format": "YYYY-MM-DD",
+  "news_sort_options": [
+    "crawlDate",
+    "publishedDate"
+  ],
+  "resample_frequencies": {
+    "crypto": [
+      "1min",
+      "5min",
+      "15min",
+      "30min",
+      "1hour",
+      "1day"
+    ],
+    "forex": [
+      "1min",
+      "5min",
+      "15min",
+      "30min",
+      "1hour",
+      "1day"
+    ],
+    "intraday": [
+      "1min",
+      "5min",
+      "15min",
+      "30min",
+      "1hour"
+    ],
+    "stocks_eod": [
+      "daily",
+      "weekly",
+      "monthly",
+      "annually"
+    ]
+  }
+}
