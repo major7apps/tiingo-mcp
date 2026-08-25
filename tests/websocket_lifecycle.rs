@@ -2947,6 +2947,7 @@ async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
 
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(74)).await;
+    tokio::time::resume();
     let update_registry = registry.clone();
     let update_id = started.id.clone();
     let update = tokio::spawn(async move {
@@ -2965,7 +2966,6 @@ async fn data_received_while_waiting_for_update_ack_refreshes_liveness() {
     messages_received
         .await
         .expect("server sends interleaved data and acknowledgement");
-    tokio::time::resume();
     let updated = update
         .await
         .expect("update task joins")
