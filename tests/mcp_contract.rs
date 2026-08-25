@@ -540,7 +540,7 @@ async fn child_process_contract() -> anyhow::Result<()> {
     let baseline: Value = serde_json::from_str(V1_CONTRACT)?;
     let client = ().serve(TokioChildProcess::new(child_command())?).await?;
 
-    assert_eq!(client.list_all_tools().await?.len(), 23);
+    assert_eq!(client.list_all_tools().await?.len(), 27);
     assert_eq!(client.list_all_resources().await?.len(), 3);
     assert_eq!(client.list_all_resource_templates().await?.len(), 1);
     assert_eq!(client.list_all_prompts().await?.len(), 5);

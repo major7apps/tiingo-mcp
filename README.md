@@ -93,6 +93,22 @@ TIINGO_API_KEY=your-api-key-here tiingo-mcp
 | `get_realtime_price` | Current IEX top-of-book quote |
 | `get_intraday_prices` | Intraday prices at supported resample frequencies |
 
+### Consolidated equity beta (4am–8pm ET)
+
+| Tool | Description |
+|------|-------------|
+| `get_equity_realtime_snapshot` | Consolidated ticker or all-market snapshot |
+| `get_equity_intraday_prices` | Consolidated intraday history with resampling, after-hours, fill, and column filters |
+
+### BOATS beta/add-on (8pm–3:59am ET)
+
+| Tool | Description |
+|------|-------------|
+| `get_boats_snapshot` | BOATS ticker or all-market snapshot |
+| `get_boats_prices` | BOATS intraday history with resampling, after-hours, and column filters |
+
+The consolidated-equity and BOATS beta sessions are separate offerings, not a unified 24x5 endpoint.
+
 ### Forex
 
 | Tool | Description |

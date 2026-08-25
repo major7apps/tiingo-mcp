@@ -74,6 +74,60 @@ pub struct IexMarketSnapshotArgs {}
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct EquityRealtimeSnapshotArgs {
+    #[serde(default)]
+    pub ticker: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EquityIntradayPricesArgs {
+    pub ticker: String,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub start_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub resample_freq: Option<IntradayResample>,
+    #[serde(default)]
+    pub after_hours: Option<bool>,
+    #[serde(default)]
+    pub force_fill: Option<bool>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoatsSnapshotArgs {
+    #[serde(default)]
+    pub ticker: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoatsPricesArgs {
+    pub ticker: String,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub start_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub resample_freq: Option<IntradayResample>,
+    #[serde(default)]
+    pub after_hours: Option<bool>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForexQuoteArgs {
     pub ticker: String,
 }
@@ -412,6 +466,75 @@ impl TiingoServer {
         Parameters(_args): Parameters<IexMarketSnapshotArgs>,
     ) -> CallToolResult {
         tool_result(self.client.get_iex_market_snapshot().await)
+    }
+
+    #[rmcp::tool(
+        description = "Get a consolidated equity beta snapshot for Tiingo's 4am–8pm ET session. It is distinct from the BOATS beta/add-on 8pm–3:59am ET session; the tools are not a unified 24x5 endpoint. Omit ticker for the all-market snapshot.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_equity_realtime_snapshot(
+        &self,
+        Parameters(args): Parameters<EquityRealtimeSnapshotArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_equity_realtime_snapshot(args.ticker.as_deref())
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get consolidated equity beta intraday history for Tiingo's 4am–8pm ET session. It is distinct from the BOATS beta/add-on 8pm–3:59am ET session; the tools are not a unified 24x5 endpoint.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day.\n    after_hours: Include after-hours pricing data.\n    force_fill: Forward-fill missing intervals.\n    columns: Optional response column identifiers.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_equity_intraday_prices(
+        &self,
+        Parameters(args): Parameters<EquityIntradayPricesArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_equity_intraday_prices(
+                    &args.ticker,
+                    range(args.start_date, args.end_date),
+                    args.resample_freq,
+                    args.after_hours,
+                    args.force_fill,
+                    args.columns.as_deref(),
+                )
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get a BOATS beta/add-on snapshot for Tiingo's 8pm–3:59am ET session. It is distinct from the consolidated equity beta 4am–8pm ET session; the tools are not a unified 24x5 endpoint. Omit ticker for the all-market snapshot.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_boats_snapshot(
+        &self,
+        Parameters(args): Parameters<BoatsSnapshotArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_boats_snapshot(args.ticker.as_deref()).await)
+    }
+
+    #[rmcp::tool(
+        description = "Get BOATS beta/add-on intraday history for Tiingo's 8pm–3:59am ET session. It is distinct from the consolidated equity beta 4am–8pm ET session; the tools are not a unified 24x5 endpoint.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day.\n    after_hours: Include after-hours pricing data.\n    columns: Optional response column identifiers.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_boats_prices(
+        &self,
+        Parameters(args): Parameters<BoatsPricesArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_boats_prices(
+                    &args.ticker,
+                    range(args.start_date, args.end_date),
+                    args.resample_freq,
+                    args.after_hours,
+                    args.columns.as_deref(),
+                )
+                .await,
+        )
     }
 
     #[rmcp::tool(

@@ -5,7 +5,7 @@ use serde_json::Value;
 use tiingo_mcp::{
     client::{
         TiingoClient,
-        query::{DateRange, NewsQuery},
+        query::{DateRange, IntradayResample, NewsQuery},
     },
     error::TiingoError,
 };
@@ -168,6 +168,74 @@ fn corporate_action_range() -> DateRange {
         start_date: Some(date(2023, 1, 1)),
         end_date: Some(date(2024, 12, 31)),
     }
+}
+
+fn require_live_api_key() -> anyhow::Result<()> {
+    anyhow::ensure!(
+        std::env::var("TIINGO_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .is_some(),
+        "TIINGO_API_KEY must be set to a non-empty value when an ignored live smoke is selected"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY and consumes quota"]
+async fn live_consolidated_equity_single_ticker() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    classify(
+        "consolidated equity snapshot",
+        ResponseShape::NonEmptyObjectArray,
+        client.get_equity_realtime_snapshot(Some("AAPL")),
+    )
+    .await?;
+    classify(
+        "consolidated equity intraday prices",
+        ResponseShape::NonEmptyObjectArray,
+        client.get_equity_intraday_prices(
+            "AAPL",
+            DateRange::default(),
+            Some(IntradayResample::OneHour),
+            None,
+            None,
+            None,
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY and consumes quota"]
+async fn live_boats_single_ticker() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    classify(
+        "BOATS snapshot",
+        ResponseShape::NonEmptyObjectArray,
+        client.get_boats_snapshot(Some("AAPL")),
+    )
+    .await?;
+    classify(
+        "BOATS prices",
+        ResponseShape::NonEmptyObjectArray,
+        client.get_boats_prices(
+            "AAPL",
+            DateRange::default(),
+            Some(IntradayResample::OneHour),
+            None,
+            None,
+        ),
+    )
+    .await?;
+
+    Ok(())
 }
 
 #[tokio::test]

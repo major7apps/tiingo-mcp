@@ -339,7 +339,7 @@ struct ExpectedToolSchema {
     optional: &'static [&'static str],
 }
 
-const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
+const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 21] = [
     ExpectedToolSchema {
         name: "get_stock_metadata",
         properties: &["ticker"],
@@ -466,6 +466,58 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 17] = [
         required: &["ticker"],
         optional: &["start_date", "end_date"],
     },
+    ExpectedToolSchema {
+        name: "get_equity_realtime_snapshot",
+        properties: &["ticker"],
+        required: &[],
+        optional: &["ticker"],
+    },
+    ExpectedToolSchema {
+        name: "get_equity_intraday_prices",
+        properties: &[
+            "ticker",
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "after_hours",
+            "force_fill",
+            "columns",
+        ],
+        required: &["ticker"],
+        optional: &[
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "after_hours",
+            "force_fill",
+            "columns",
+        ],
+    },
+    ExpectedToolSchema {
+        name: "get_boats_snapshot",
+        properties: &["ticker"],
+        required: &[],
+        optional: &["ticker"],
+    },
+    ExpectedToolSchema {
+        name: "get_boats_prices",
+        properties: &[
+            "ticker",
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "after_hours",
+            "columns",
+        ],
+        required: &["ticker"],
+        optional: &[
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "after_hours",
+            "columns",
+        ],
+    },
 ];
 
 #[tokio::test]
@@ -480,7 +532,7 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         .collect::<BTreeSet<_>>();
     let expected_names = TOOL_NAMES.into_iter().collect::<BTreeSet<_>>();
 
-    assert_eq!(tools.len(), TOOL_NAMES.len() + 6);
+    assert_eq!(tools.len(), TOOL_NAMES.len() + 10);
     assert!(expected_names.is_subset(&actual_names));
     assert!(actual_names.contains("get_bulk_eod_prices"));
     assert!(actual_names.contains("get_ticker_metadata"));
@@ -488,6 +540,10 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
     assert!(actual_names.contains("get_forex_quotes"));
     assert!(actual_names.contains("get_distributions_by_ex_date"));
     assert!(actual_names.contains("get_splits_by_ex_date"));
+    assert!(actual_names.contains("get_equity_realtime_snapshot"));
+    assert!(actual_names.contains("get_equity_intraday_prices"));
+    assert!(actual_names.contains("get_boats_snapshot"));
+    assert!(actual_names.contains("get_boats_prices"));
 
     for tool in &tools {
         assert!(
@@ -663,6 +719,124 @@ async fn additive_task_two_tools_preserve_json_text_and_structured_data() {
             "get_splits_by_ex_date",
             serde_json::json!({"ex_date": "2027-03-01"}),
             splits,
+        ),
+    ] {
+        let result = connection
+            .client
+            .call_tool(CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)))
+            .await
+            .unwrap();
+        assert_accurate_success(name, &result, &expected);
+    }
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn additive_task_three_tools_preserve_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let equity_snapshot = serde_json::json!([{"ticker": "AAPL", "last": 227.16}]);
+    let equity_prices = serde_json::json!([{
+        "date": "2024-01-02T14:30:00Z",
+        "ticker": "AAPL",
+        "close": 227.16
+    }]);
+    let boats_snapshot = serde_json::json!([{"ticker": "AAPL", "last": 226.98}]);
+    let boats_prices = serde_json::json!([{
+        "date": "2024-01-02T23:30:00Z",
+        "ticker": "AAPL",
+        "close": 226.98
+    }]);
+
+    for route in [
+        "/tiingo/equity/intraday",
+        "/tiingo/equity/intraday/AAPL",
+        "/boats",
+        "/boats/AAPL",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                if route.starts_with("/boats") {
+                    boats_snapshot.clone()
+                } else {
+                    equity_snapshot.clone()
+                },
+            ))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/tiingo/equity/intraday/AAPL/prices"))
+        .and(query_param("startDate", "2024-01-01"))
+        .and(query_param("endDate", "2024-01-31"))
+        .and(query_param("resampleFreq", "5min"))
+        .and(query_param("afterHours", "true"))
+        .and(query_param("forceFill", "true"))
+        .and(query_param("columns", "date,close"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(equity_prices.clone()))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/boats/AAPL/prices"))
+        .and(query_param("startDate", "2024-01-01"))
+        .and(query_param("endDate", "2024-01-31"))
+        .and(query_param("resampleFreq", "1hour"))
+        .and(query_param("afterHours", "false"))
+        .and(query_param("columns", "ticker,close"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(boats_prices.clone()))
+        .expect(1)
+        .mount(&upstream)
+        .await;
+
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+    for (name, call_arguments, expected) in [
+        (
+            "get_equity_realtime_snapshot",
+            serde_json::json!({}),
+            equity_snapshot.clone(),
+        ),
+        (
+            "get_equity_realtime_snapshot",
+            serde_json::json!({"ticker": "AAPL"}),
+            equity_snapshot,
+        ),
+        (
+            "get_equity_intraday_prices",
+            serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "5min",
+                "after_hours": true,
+                "force_fill": true,
+                "columns": ["date", "close"]
+            }),
+            equity_prices,
+        ),
+        (
+            "get_boats_snapshot",
+            serde_json::json!({}),
+            boats_snapshot.clone(),
+        ),
+        (
+            "get_boats_snapshot",
+            serde_json::json!({"ticker": "AAPL"}),
+            boats_snapshot,
+        ),
+        (
+            "get_boats_prices",
+            serde_json::json!({
+                "ticker": "AAPL",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "1hour",
+                "after_hours": false,
+                "columns": ["ticker", "close"]
+            }),
+            boats_prices,
         ),
     ] {
         let result = connection

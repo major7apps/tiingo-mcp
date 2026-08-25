@@ -256,6 +256,118 @@ async fn iex_snapshot_intraday_columns_and_forex_batch_use_exact_routes_and_quer
 }
 
 #[tokio::test]
+async fn equity_and_boats_clients_use_exact_routes_queries_and_omit_absent_values() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+
+    for route in [
+        "/tiingo/equity/intraday",
+        "/tiingo/equity/intraday/AAPL",
+        "/tiingo/equity/intraday/AAPL/prices",
+        "/tiingo/equity/intraday/MSFT/prices",
+        "/boats",
+        "/boats/AAPL",
+        "/boats/AAPL/prices",
+        "/boats/MSFT/prices",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    client.get_equity_realtime_snapshot(None).await.unwrap();
+    client
+        .get_equity_realtime_snapshot(Some("AAPL"))
+        .await
+        .unwrap();
+    client
+        .get_equity_intraday_prices(
+            "AAPL",
+            populated_range(),
+            Some(IntradayResample::FiveMinutes),
+            Some(true),
+            Some(true),
+            Some(&["date".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_equity_intraday_prices("MSFT", DateRange::default(), None, None, None, None)
+        .await
+        .unwrap();
+    client.get_boats_snapshot(None).await.unwrap();
+    client.get_boats_snapshot(Some("AAPL")).await.unwrap();
+    client
+        .get_boats_prices(
+            "AAPL",
+            populated_range(),
+            Some(IntradayResample::OneHour),
+            Some(false),
+            Some(&["ticker".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_boats_prices("MSFT", DateRange::default(), None, None, None)
+        .await
+        .unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            ("/boats".to_owned(), vec![]),
+            ("/boats/AAPL".to_owned(), vec![]),
+            (
+                "/boats/AAPL/prices".to_owned(),
+                vec![
+                    ("afterHours".to_owned(), "false".to_owned()),
+                    ("columns".to_owned(), "ticker,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("resampleFreq".to_owned(), "1hour".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            ("/boats/MSFT/prices".to_owned(), vec![]),
+            ("/tiingo/equity/intraday".to_owned(), vec![]),
+            ("/tiingo/equity/intraday/AAPL".to_owned(), vec![]),
+            (
+                "/tiingo/equity/intraday/AAPL/prices".to_owned(),
+                vec![
+                    ("afterHours".to_owned(), "true".to_owned()),
+                    ("columns".to_owned(), "date,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("forceFill".to_owned(), "true".to_owned()),
+                    ("resampleFreq".to_owned(), "5min".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            ("/tiingo/equity/intraday/MSFT/prices".to_owned(), vec![]),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn market_column_and_forex_pair_lists_reject_invalid_values_before_requesting_tiingo() {
     let server = MockServer::start().await;
     let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
@@ -317,6 +429,15 @@ async fn rejects_unsafe_path_symbols_before_requesting_tiingo() {
 
     for ticker in [".", "..", "A/APL", "A?APL", "A#APL", "A%APL"] {
         let error = client.get_stock_metadata(ticker).await.unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+
+        let error = client
+            .get_equity_realtime_snapshot(Some(ticker))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+
+        let error = client.get_boats_snapshot(Some(ticker)).await.unwrap_err();
         assert!(matches!(error, TiingoError::Validation(_)));
     }
 
