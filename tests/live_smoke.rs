@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, time::Instant};
 
 use chrono::NaiveDate;
 use serde_json::Value;
@@ -152,6 +152,36 @@ async fn classify(
     }
 }
 
+async fn classify_samples<F, Fut>(
+    capability: &str,
+    expected_shape: ResponseShape,
+    mut request: F,
+) -> anyhow::Result<LiveOutcome>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Value, TiingoError>>,
+{
+    const SAMPLES: usize = 3;
+
+    let mut latencies = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        let outcome = classify(capability, expected_shape, request()).await?;
+        if outcome == LiveOutcome::Entitlement {
+            return Ok(outcome);
+        }
+        latencies.push(started.elapsed());
+    }
+    latencies.sort_unstable();
+    let median = latencies[SAMPLES / 2];
+    let p95 = latencies[(SAMPLES * 95).div_ceil(100) - 1];
+    println!(
+        "LIVE {capability}: latency min={:?}, median={median:?}, p95={p95:?}, samples={SAMPLES}",
+        latencies[0]
+    );
+    Ok(LiveOutcome::Success)
+}
+
 fn date(year: i32, month: u32, day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, day).unwrap()
 }
@@ -232,6 +262,72 @@ async fn live_boats_single_ticker() -> anyhow::Result<()> {
             None,
             None,
         ),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, enterprise/institutional fund-fee access, and consumes quota"]
+async fn live_fund_fees_single_ticker() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    if classify_samples("fund metadata", ResponseShape::NonEmptyObject, || {
+        client.get_fund_metadata("VFIAX")
+    })
+    .await?
+        == LiveOutcome::Entitlement
+    {
+        return Ok(());
+    }
+    classify_samples(
+        "fund fee metrics",
+        ResponseShape::NonEmptyObjectArray,
+        || client.get_fund_fee_metrics("VFIAX"),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, early-beta Search access, and consumes quota"]
+async fn live_search_early_beta() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+
+    classify_samples(
+        "Tiingo asset search",
+        ResponseShape::NonEmptyObjectArray,
+        || client.search_tiingo_assets("AAPL"),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TIINGO_API_KEY, Crypto Yield entitlement, and consumes quota"]
+async fn live_crypto_yield_metrics_single_pool() -> anyhow::Result<()> {
+    require_live_api_key()?;
+    let client = TiingoClient::from_env()?;
+    let range = DateRange {
+        start_date: Some(date(2024, 1, 1)),
+        end_date: Some(date(2024, 1, 2)),
+    };
+
+    classify_samples(
+        "crypto yield pool metrics",
+        ResponseShape::NonEmptyObjectArray,
+        || {
+            client.get_crypto_yield_metrics(
+                "aavev2_usdc",
+                range,
+                Some(IntradayResample::FiveMinutes),
+            )
+        },
     )
     .await?;
 

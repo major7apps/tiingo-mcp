@@ -17,13 +17,16 @@ use crate::{
 pub mod boats;
 pub mod corporate_actions;
 pub mod crypto;
+pub mod crypto_yield;
 pub mod eod;
 pub mod equity;
 pub mod forex;
 pub mod fundamentals;
+pub mod funds;
 pub mod iex;
 pub mod news;
 pub mod query;
+pub mod search;
 
 #[derive(Clone, Debug)]
 pub struct TiingoClient {

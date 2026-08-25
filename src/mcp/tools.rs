@@ -128,6 +128,64 @@ pub struct BoatsPricesArgs {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct FundMetadataArgs {
+    pub ticker: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FundFeeMetricsArgs {
+    pub ticker: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchTiingoAssetsArgs {
+    pub query: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CryptoYieldPlatformsArgs {
+    #[serde(default)]
+    pub platform_codes: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CryptoYieldPoolsArgs {
+    #[serde(default)]
+    pub pool_codes: Option<Vec<String>>,
+    #[serde(default)]
+    pub platform_codes: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CryptoYieldTicksArgs {
+    #[serde(default)]
+    pub pool_codes: Option<Vec<String>>,
+    #[serde(default)]
+    pub platform_codes: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CryptoYieldMetricsArgs {
+    pub pool_code: String,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub start_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub resample_freq: Option<IntradayResample>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForexQuoteArgs {
     pub ticker: String,
 }
@@ -532,6 +590,103 @@ impl TiingoServer {
                     args.resample_freq,
                     args.after_hours,
                     args.columns.as_deref(),
+                )
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get mutual-fund or ETF metadata. Fund-fee data is enterprise/institutional access and may return an entitlement error.\n\nArgs:\n    ticker: Fund ticker symbol (e.g. VFIAX).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_fund_metadata(
+        &self,
+        Parameters(args): Parameters<FundMetadataArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_fund_metadata(&args.ticker).await)
+    }
+
+    #[rmcp::tool(
+        description = "Get current and historical mutual-fund or ETF fee metrics. This enterprise/institutional capability may return an entitlement error.\n\nArgs:\n    ticker: Fund ticker symbol (e.g. VFIAX).",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_fund_fee_metrics(
+        &self,
+        Parameters(args): Parameters<FundFeeMetricsArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.get_fund_fee_metrics(&args.ticker).await)
+    }
+
+    #[rmcp::tool(
+        description = "Search Tiingo assets by ticker or name. This endpoint is early beta and its response fields can change.\n\nArgs:\n    query: Nonblank search text, up to 256 characters.",
+        output_schema = structured_output_schema()
+    )]
+    async fn search_tiingo_assets(
+        &self,
+        Parameters(args): Parameters<SearchTiingoAssetsArgs>,
+    ) -> CallToolResult {
+        tool_result(self.client.search_tiingo_assets(&args.query).await)
+    }
+
+    #[rmcp::tool(
+        description = "Get Crypto Yield lending platforms. Crypto Yield access is plan/entitlement-dependent. Omit platform_codes for the full platform list.\n\nArgs:\n    platform_codes: Optional ordered platform-code filters.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_crypto_yield_platforms(
+        &self,
+        Parameters(args): Parameters<CryptoYieldPlatformsArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_crypto_yield_platforms(args.platform_codes.as_deref())
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get Crypto Yield lending-pool metadata. Crypto Yield access is plan/entitlement-dependent. Omit filters for the full pool list.\n\nArgs:\n    pool_codes: Optional ordered pool-code filters.\n    platform_codes: Optional ordered platform-code filters.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_crypto_yield_pools(
+        &self,
+        Parameters(args): Parameters<CryptoYieldPoolsArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_crypto_yield_pools(args.pool_codes.as_deref(), args.platform_codes.as_deref())
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get latest Crypto Yield lending-pool metric ticks. Crypto Yield access is plan/entitlement-dependent. Omit filters for the full tick list.\n\nArgs:\n    pool_codes: Optional ordered pool-code filters.\n    platform_codes: Optional ordered platform-code filters.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_crypto_yield_ticks(
+        &self,
+        Parameters(args): Parameters<CryptoYieldTicksArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_crypto_yield_ticks(args.pool_codes.as_deref(), args.platform_codes.as_deref())
+                .await,
+        )
+    }
+
+    #[rmcp::tool(
+        description = "Get historical Crypto Yield OHLC metrics for one pool. Crypto Yield access is plan/entitlement-dependent.\n\nArgs:\n    pool_code: Yield-pool code (e.g. aavev2_usdc).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day.",
+        output_schema = structured_output_schema()
+    )]
+    async fn get_crypto_yield_metrics(
+        &self,
+        Parameters(args): Parameters<CryptoYieldMetricsArgs>,
+    ) -> CallToolResult {
+        tool_result(
+            self.client
+                .get_crypto_yield_metrics(
+                    &args.pool_code,
+                    range(args.start_date, args.end_date),
+                    args.resample_freq,
                 )
                 .await,
         )

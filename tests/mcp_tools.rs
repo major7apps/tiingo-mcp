@@ -339,7 +339,7 @@ struct ExpectedToolSchema {
     optional: &'static [&'static str],
 }
 
-const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 21] = [
+const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 28] = [
     ExpectedToolSchema {
         name: "get_stock_metadata",
         properties: &["ticker"],
@@ -518,6 +518,48 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 21] = [
             "columns",
         ],
     },
+    ExpectedToolSchema {
+        name: "get_fund_metadata",
+        properties: &["ticker"],
+        required: &["ticker"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_fund_fee_metrics",
+        properties: &["ticker"],
+        required: &["ticker"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "search_tiingo_assets",
+        properties: &["query"],
+        required: &["query"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_yield_platforms",
+        properties: &["platform_codes"],
+        required: &[],
+        optional: &["platform_codes"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_yield_pools",
+        properties: &["pool_codes", "platform_codes"],
+        required: &[],
+        optional: &["pool_codes", "platform_codes"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_yield_ticks",
+        properties: &["pool_codes", "platform_codes"],
+        required: &[],
+        optional: &["pool_codes", "platform_codes"],
+    },
+    ExpectedToolSchema {
+        name: "get_crypto_yield_metrics",
+        properties: &["pool_code", "start_date", "end_date", "resample_freq"],
+        required: &["pool_code"],
+        optional: &["start_date", "end_date", "resample_freq"],
+    },
 ];
 
 #[tokio::test]
@@ -532,7 +574,7 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
         .collect::<BTreeSet<_>>();
     let expected_names = TOOL_NAMES.into_iter().collect::<BTreeSet<_>>();
 
-    assert_eq!(tools.len(), TOOL_NAMES.len() + 10);
+    assert_eq!(tools.len(), 34);
     assert!(expected_names.is_subset(&actual_names));
     assert!(actual_names.contains("get_bulk_eod_prices"));
     assert!(actual_names.contains("get_ticker_metadata"));
@@ -544,6 +586,13 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
     assert!(actual_names.contains("get_equity_intraday_prices"));
     assert!(actual_names.contains("get_boats_snapshot"));
     assert!(actual_names.contains("get_boats_prices"));
+    assert!(actual_names.contains("get_fund_metadata"));
+    assert!(actual_names.contains("get_fund_fee_metrics"));
+    assert!(actual_names.contains("search_tiingo_assets"));
+    assert!(actual_names.contains("get_crypto_yield_platforms"));
+    assert!(actual_names.contains("get_crypto_yield_pools"));
+    assert!(actual_names.contains("get_crypto_yield_ticks"));
+    assert!(actual_names.contains("get_crypto_yield_metrics"));
 
     for tool in &tools {
         assert!(
@@ -837,6 +886,110 @@ async fn additive_task_three_tools_preserve_json_text_and_structured_data() {
                 "columns": ["ticker", "close"]
             }),
             boats_prices,
+        ),
+    ] {
+        let result = connection
+            .client
+            .call_tool(CallToolRequestParams::new(name).with_arguments(arguments(call_arguments)))
+            .await
+            .unwrap();
+        assert_accurate_success(name, &result, &expected);
+    }
+
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn additive_task_four_tools_preserve_json_text_and_structured_data() {
+    let upstream = MockServer::start().await;
+    let fund_metadata = serde_json::json!({"ticker": "VFIAX", "name": "Vanguard 500 Index Fund"});
+    let fund_metrics = serde_json::json!([{"prospectusDate": "2024-01-01", "netExpense": 0.0004}]);
+    let search = serde_json::json!([{"ticker": "AAPL", "name": "Apple Inc.", "isActive": true}]);
+    let platforms = serde_json::json!([{"platformCode": "AAVEV2", "network": "ETH"}]);
+    let pools = serde_json::json!([{"poolCode": "aavev2_usdc", "yieldPlatform": "AAVEV2"}]);
+    let ticks = serde_json::json!([{"poolCode": "aavev2_usdc", "supplyRate": 0.04}]);
+    let metrics = serde_json::json!([{"date": "2024-01-01T00:00:00Z", "closeSupplyRate": 0.04}]);
+
+    for (route, query, response) in [
+        ("/tiingo/funds/VFIAX", None, fund_metadata.clone()),
+        ("/tiingo/funds/VFIAX/metrics", None, fund_metrics.clone()),
+        (
+            "/tiingo/utilities/search",
+            Some(("query", "Apple")),
+            search.clone(),
+        ),
+        (
+            "/tiingo/crypto-yield/platforms",
+            Some(("platformCodes", "AAVEV2,COMPOUND")),
+            platforms.clone(),
+        ),
+        (
+            "/tiingo/crypto-yield/pools",
+            Some(("poolCodes", "aavev2_usdc,compound_usdc")),
+            pools.clone(),
+        ),
+        (
+            "/tiingo/crypto-yield/ticks",
+            Some(("platformCodes", "AAVEV2")),
+            ticks.clone(),
+        ),
+        (
+            "/tiingo/crypto-yield/aavev2_usdc/metrics",
+            Some(("resampleFreq", "5min")),
+            metrics.clone(),
+        ),
+    ] {
+        let mut mock = Mock::given(method("GET")).and(path(route));
+        if let Some((name, value)) = query {
+            mock = mock.and(query_param(name, value));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+    }
+
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+    for (name, call_arguments, expected) in [
+        (
+            "get_fund_metadata",
+            serde_json::json!({"ticker": "VFIAX"}),
+            fund_metadata,
+        ),
+        (
+            "get_fund_fee_metrics",
+            serde_json::json!({"ticker": "VFIAX"}),
+            fund_metrics,
+        ),
+        (
+            "search_tiingo_assets",
+            serde_json::json!({"query": "  Apple  "}),
+            search,
+        ),
+        (
+            "get_crypto_yield_platforms",
+            serde_json::json!({"platform_codes": ["AAVEV2", "COMPOUND"]}),
+            platforms,
+        ),
+        (
+            "get_crypto_yield_pools",
+            serde_json::json!({"pool_codes": ["aavev2_usdc", "compound_usdc"]}),
+            pools,
+        ),
+        (
+            "get_crypto_yield_ticks",
+            serde_json::json!({"platform_codes": ["AAVEV2"]}),
+            ticks,
+        ),
+        (
+            "get_crypto_yield_metrics",
+            serde_json::json!({
+                "pool_code": "aavev2_usdc",
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "resample_freq": "5min"
+            }),
+            metrics,
         ),
     ] {
         let result = connection
