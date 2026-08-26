@@ -3,13 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml)
 
-A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. The unreleased development tree exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts.
+A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. The unreleased development tree exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts. This surface is being prepared as version 2.1.0.
 
 The server uses MCP over stdio. Its finite subscription tools connect to upstream Tiingo WebSockets; MCP Streamable HTTP and WebSocket transports are not part of this server.
 
 ## Installation
 
-Published 2.0.2 installers and the crates.io package expose the released 17-tool surface. The expanded 38-tool surface documented below is Unreleased and requires building this development branch from source; the release URLs remain pinned to the latest published tag.
+Published 2.0.2 installers and the crates.io package expose the released 17-tool surface. Version 2.1.0 is in release preparation with the expanded 38-tool surface documented below; until it is published, build this branch from source to use that surface. Release URLs remain pinned to the latest published tag.
 
 ### Release installer
 
@@ -29,10 +29,16 @@ The installers place `tiingo-mcp` in Cargo's binary directory. Ensure that direc
 
 ### Cargo
 
-With Rust 1.88 or newer installed:
+With Rust 1.88 or newer installed, install the latest published release:
 
 ```bash
-cargo install tiingo-mcp --locked
+cargo install tiingo-mcp --version 2.0.2 --locked
+```
+
+To install the unreleased 2.1.0 release-preparation tree from a local checkout:
+
+```bash
+cargo install --path . --locked
 ```
 
 ### MCPB desktop bundle
@@ -81,7 +87,7 @@ TIINGO_API_KEY=your-api-key-here tiingo-mcp
 
 ## Tools
 
-This is the Unreleased 38-tool development surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
+This is the 2.1.0 release-preparation 38-tool surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
 
 ### Stocks (EOD and lifecycle metadata)
 
