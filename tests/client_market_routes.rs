@@ -602,6 +602,33 @@ async fn bulk_eod_prices_reject_malformed_numeric_csv_fields() {
 }
 
 #[tokio::test]
+async fn bulk_eod_prices_reject_blank_identity_fields() {
+    for (date, ticker) in [
+        ("", "AAPL"),
+        ("   ", "AAPL"),
+        ("2024-01-02", ""),
+        ("2024-01-02", "   "),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "date,ticker,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjClose,adjVolume,divCash,splitFactor\n{date},{ticker},100,105,99,104,1000,100,105,99,104,1000,0,1\n"
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+        let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+        assert!(
+            matches!(error, TiingoError::Decode { .. }),
+            "date={date:?}, ticker={ticker:?} was accepted"
+        );
+    }
+}
+
+#[tokio::test]
 async fn bulk_eod_prices_reject_every_non_finite_financial_field() {
     let headers = [
         "date",

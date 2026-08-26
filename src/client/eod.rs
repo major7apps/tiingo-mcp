@@ -120,7 +120,10 @@ impl TiingoClient {
             let price = row.map_err(|_| TiingoError::Decode {
                 capability: "bulk EOD prices",
             })?;
-            if !price.has_only_finite_financial_fields() {
+            if price.date.trim().is_empty()
+                || price.ticker.trim().is_empty()
+                || !price.has_only_finite_financial_fields()
+            {
                 return Err(TiingoError::Decode {
                     capability: "bulk EOD prices",
                 });
