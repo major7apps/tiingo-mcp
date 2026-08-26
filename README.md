@@ -3,26 +3,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml)
 
-A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. The unreleased development tree exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts. This surface is being prepared as version 2.1.0.
+A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. Version 2.1.0 exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts.
 
 The server uses MCP over stdio. Its finite subscription tools connect to upstream Tiingo WebSockets; MCP Streamable HTTP and WebSocket transports are not part of this server.
 
 ## Installation
 
-Published 2.0.2 installers and the crates.io package expose the released 17-tool surface. Version 2.1.0 is in release preparation with the expanded 38-tool surface documented below; until it is published, build this branch from source to use that surface. Release URLs remain pinned to the latest published tag.
+Published 2.1.0 installers, MCPB bundles, and the crates.io package expose the 38-tool surface documented below.
 
 ### Release installer
 
 On macOS or Linux:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/major7apps/tiingo-mcp/releases/download/v2.0.2/tiingo-mcp-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.sh | sh
 ```
 
 On Windows PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/download/v2.0.2/tiingo-mcp-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.ps1 | iex"
 ```
 
 The installers place `tiingo-mcp` in Cargo's binary directory. Ensure that directory is on `PATH` so MCP clients can use the command by name.
@@ -32,10 +32,10 @@ The installers place `tiingo-mcp` in Cargo's binary directory. Ensure that direc
 With Rust 1.88 or newer installed, install the latest published release:
 
 ```bash
-cargo install tiingo-mcp --version 2.0.2 --locked
+cargo install tiingo-mcp --version 2.1.0 --locked
 ```
 
-To install the unreleased 2.1.0 release-preparation tree from a local checkout:
+To install the current development tree from a local checkout:
 
 ```bash
 cargo install --path . --locked
@@ -87,7 +87,7 @@ TIINGO_API_KEY=your-api-key-here tiingo-mcp
 
 ## Tools
 
-This is the 2.1.0 release-preparation 38-tool surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
+Version 2.1.0 exposes this 38-tool surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
 
 ### Stocks (EOD and lifecycle metadata)
 
