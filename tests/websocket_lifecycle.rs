@@ -3444,6 +3444,228 @@ async fn transport_loss_during_update_preserves_buffered_data_through_reconnect(
 }
 
 #[tokio::test]
+async fn acknowledged_remove_survives_add_failure_and_reconnect() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let (reconnect_symbols, receive_reconnect_symbols) = tokio::sync::oneshot::channel();
+    let (reconnect_ready, await_reconnect_ready) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept initial client");
+        let mut socket = accept_async(stream)
+            .await
+            .expect("initial WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("initial subscribe")
+            .expect("valid initial subscribe");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-initial-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+
+        let remove = socket
+            .next()
+            .await
+            .expect("remove command")
+            .expect("valid remove command")
+            .into_text()
+            .expect("text remove command");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&remove).expect("remove JSON"),
+            json!({
+                "eventName": "unsubscribe",
+                "authorization": "test-key",
+                "eventData": {
+                    "subscriptionId": "partial-initial-id",
+                    "tickers": ["AAPL"]
+                }
+            })
+        );
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-remove-id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("acknowledge remove");
+
+        let add = socket
+            .next()
+            .await
+            .expect("add command")
+            .expect("valid add command")
+            .into_text()
+            .expect("text add command");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&add).expect("add JSON"),
+            json!({
+                "eventName": "subscribe",
+                "authorization": "test-key",
+                "eventData": {"subscriptionId": "partial-remove-id", "tickers": ["NVDA"]}
+            })
+        );
+        socket
+            .send(Message::Close(None))
+            .await
+            .expect("disconnect before add acknowledgement");
+        drop(socket);
+
+        let (stream, _) = listener.accept().await.expect("accept reconnect");
+        let mut socket = accept_async(stream)
+            .await
+            .expect("reconnect WebSocket handshake");
+        let fresh_subscribe = socket
+            .next()
+            .await
+            .expect("fresh subscribe")
+            .expect("valid fresh subscribe")
+            .into_text()
+            .expect("text fresh subscribe");
+        let fresh_subscribe: serde_json::Value =
+            serde_json::from_str(&fresh_subscribe).expect("fresh subscribe JSON");
+        reconnect_symbols
+            .send(fresh_subscribe["eventData"]["tickers"].clone())
+            .expect("record reconnect symbols");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-reconnect-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("acknowledge reconnect");
+        let ping_payload = vec![0x72];
+        socket
+            .send(Message::Ping(ping_payload.clone().into()))
+            .await
+            .expect("send reconnect processing barrier");
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => break,
+                Some(Ok(_)) => {}
+                Some(Err(error)) => panic!("receive reconnect barrier: {error}"),
+                None => panic!("reconnect barrier socket remains open"),
+            }
+        }
+        reconnect_ready.send(()).expect("record reconnect ready");
+
+        let add = socket
+            .next()
+            .await
+            .expect("post-reconnect add command")
+            .expect("valid post-reconnect add command")
+            .into_text()
+            .expect("text post-reconnect add command");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&add).expect("post-reconnect add JSON"),
+            json!({
+                "eventName": "subscribe",
+                "authorization": "test-key",
+                "eventData": {
+                    "subscriptionId": "partial-reconnect-id",
+                    "tickers": ["AAPL"]
+                }
+            })
+        );
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-restored-id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("acknowledge post-reconnect add");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let (delay_requests, mut requested_delays) = tokio::sync::mpsc::unbounded_channel();
+    let registry = MarketDataRegistry::with_connector_and_clocks(
+        Some("test-key".into()),
+        connector,
+        Arc::new(FixedClock(Utc::now())),
+        Arc::new(ManualReconnectClock {
+            requests: delay_requests,
+        }),
+    );
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into(), "MSFT".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+
+    let error = registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["NVDA".into()],
+                remove_symbols: vec!["AAPL".into()],
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect_err("unacknowledged add reports transport failure");
+    assert_eq!(error.payload().kind, "transport");
+    let (delay, release) = requested_delays
+        .recv()
+        .await
+        .expect("worker requests reconnect delay");
+    assert_eq!(delay, Duration::from_millis(250));
+    release.send(()).expect("release reconnect delay");
+    let reconnect_symbols = receive_reconnect_symbols
+        .await
+        .expect("reconnect symbol inventory is recorded");
+    assert_eq!(reconnect_symbols, json!(["MSFT"]));
+    await_reconnect_ready
+        .await
+        .expect("reconnect acknowledgement is processed");
+
+    let updated = registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["AAPL".into()],
+                remove_symbols: vec![],
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect("removed symbol can be added again after reconnect");
+    assert_eq!(updated.symbols, vec!["MSFT", "AAPL"]);
+
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+}
+
+#[tokio::test]
 async fn update_acknowledgement_is_bounded_to_five_seconds_and_closes_uncertain_state() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

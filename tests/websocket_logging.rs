@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{process::Command, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
 use tiingo_mcp::websocket::{
@@ -28,7 +28,7 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                 .await
                 .expect("bind mock WebSocket");
             let endpoint = format!("ws://{}", listener.local_addr().expect("mock address"));
-            let server = tokio::spawn(async move {
+            let mut server = tokio::spawn(async move {
                 let (stream, _) = listener.accept().await.expect("accept mock client");
                 let mut socket = accept_async(stream).await.expect("accept WebSocket");
                 socket
@@ -68,16 +68,17 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
             })
             .await
             .expect("trace child task joined");
-            server.await.expect("mock server joined");
+            match tokio::time::timeout(Duration::from_secs(5), &mut server).await {
+                Ok(joined) => joined.expect("mock server joined"),
+                Err(_) => {
+                    server.abort();
+                    let _ = server.await;
+                    panic!("mock server did not finish within five seconds");
+                }
+            }
             output
         });
-    assert!(
-        output.status.success(),
-        "trace child failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
+    let status = output.status;
     let mut captured = output.stdout;
     captured.extend(output.stderr);
     let captured = String::from_utf8_lossy(&captured);
@@ -86,6 +87,7 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
         !captured.contains(UPSTREAM_ID),
         "upstream subscription ID escaped trace output"
     );
+    assert!(status.success(), "trace child failed with status {status}");
 }
 
 fn run_trace_child() {

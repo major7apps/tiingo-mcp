@@ -497,6 +497,8 @@ async fn apply_update(
         };
         remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
         *subscription_id = acknowledged_subscription_id;
+        symbols.retain(|symbol| !remove_symbols.contains(symbol));
+        session.data.lock().await.symbols = symbols.clone();
         publish_buffered_messages(
             session,
             codec,
@@ -539,6 +541,8 @@ async fn apply_update(
         };
         remember_subscription_id(acknowledged_subscription_ids, &acknowledged_subscription_id);
         *subscription_id = acknowledged_subscription_id;
+        symbols.extend(add_symbols);
+        session.data.lock().await.symbols = symbols.clone();
         publish_buffered_messages(
             session,
             codec,
@@ -548,8 +552,6 @@ async fn apply_update(
         )
         .await?;
     }
-    symbols.retain(|symbol| !remove_symbols.contains(symbol));
-    symbols.extend(add_symbols);
     Ok(())
 }
 
@@ -778,13 +780,10 @@ async fn queue_text_message(
     let (vendor_timestamp, symbol) = message_identity(&received.message);
 
     let mut data = session.data.lock().await;
-    let duplicate = vendor_timestamp
-        .as_ref()
-        .map(|timestamp| {
-            data.seen_observations
-                .insert(format!("{timestamp}\0{duplicate_payload_fingerprint}"))
-        })
-        .is_some_and(|inserted| !inserted);
+    let duplicate = vendor_timestamp.as_ref().is_some_and(|timestamp| {
+        data.seen_observations
+            .observe(format!("{timestamp}\0{duplicate_payload_fingerprint}"))
+    });
     let out_of_order = match (&symbol, &vendor_timestamp) {
         (Some(symbol), Some(timestamp)) => DateTime::parse_from_rfc3339(timestamp)
             .ok()

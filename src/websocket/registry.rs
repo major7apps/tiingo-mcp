@@ -26,8 +26,8 @@ use tokio_tungstenite::{
 use crate::{
     config::{
         MAX_WEBSOCKET_MESSAGE_BYTES, MAX_WEBSOCKET_POLL_BYTES, MAX_WEBSOCKET_POLL_EVENTS,
-        MAX_WEBSOCKET_SESSIONS, MAX_WEBSOCKET_SYMBOLS, WEBSOCKET_ACK_TIMEOUT,
-        WEBSOCKET_POLL_TIMEOUT,
+        MAX_WEBSOCKET_QUEUE_BYTES, MAX_WEBSOCKET_QUEUE_EVENTS, MAX_WEBSOCKET_SESSIONS,
+        MAX_WEBSOCKET_SYMBOLS, WEBSOCKET_ACK_TIMEOUT, WEBSOCKET_POLL_TIMEOUT,
     },
     error::TiingoError,
     websocket::protocol::{Authorization, ProtocolCodec, Service},
@@ -155,12 +155,56 @@ struct SessionData {
     events: VecDeque<MarketDataEvent>,
     queue_bytes: usize,
     next_sequence: u64,
-    seen_observations: HashSet<String>,
+    seen_observations: RecentObservations,
     latest_timestamp_by_symbol: HashMap<String, DateTime<Utc>>,
     symbols: Vec<String>,
     threshold_level: u8,
     started_at: Instant,
     last_access: Instant,
+}
+
+#[derive(Default)]
+struct RecentObservations {
+    fingerprints: HashSet<Arc<str>>,
+    order: VecDeque<Arc<str>>,
+    bytes: usize,
+}
+
+impl RecentObservations {
+    fn observe(&mut self, fingerprint: String) -> bool {
+        let fingerprint = Arc::<str>::from(fingerprint);
+        if self.fingerprints.contains(&fingerprint) {
+            return true;
+        }
+        let fingerprint_bytes = fingerprint.len();
+        if fingerprint_bytes > MAX_WEBSOCKET_QUEUE_BYTES {
+            return false;
+        }
+        while self.order.len() >= MAX_WEBSOCKET_QUEUE_EVENTS
+            || self.bytes.saturating_add(fingerprint_bytes) > MAX_WEBSOCKET_QUEUE_BYTES
+        {
+            let oldest = self
+                .order
+                .pop_front()
+                .expect("a full observation window has an oldest fingerprint");
+            self.fingerprints.remove(&oldest);
+            self.bytes -= oldest.len();
+        }
+        self.fingerprints.insert(Arc::clone(&fingerprint));
+        self.order.push_back(fingerprint);
+        self.bytes += fingerprint_bytes;
+        false
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.order.len()
+    }
+
+    #[cfg(test)]
+    fn retained_bytes(&self) -> usize {
+        self.bytes
+    }
 }
 
 pub trait ReceiveClock: fmt::Debug + Send + Sync + 'static {
@@ -398,7 +442,7 @@ impl MarketDataRegistry {
                     events: VecDeque::new(),
                     queue_bytes: 0,
                     next_sequence: 1,
-                    seen_observations: HashSet::new(),
+                    seen_observations: RecentObservations::default(),
                     latest_timestamp_by_symbol: HashMap::new(),
                     symbols: symbols.clone(),
                     threshold_level,
@@ -882,7 +926,7 @@ mod tests {
                 events,
                 queue_bytes: 0,
                 next_sequence: MAX_WEBSOCKET_POLL_EVENTS as u64 + 1,
-                seen_observations: HashSet::new(),
+                seen_observations: RecentObservations::default(),
                 latest_timestamp_by_symbol: HashMap::new(),
                 symbols: vec!["AAPL".into()],
                 threshold_level: 6,
@@ -912,5 +956,37 @@ mod tests {
             1,
             "poll byte admission must not reserialize the growing result"
         );
+    }
+
+    #[test]
+    fn duplicate_tracking_is_bounded_to_the_recent_queue_capacity() {
+        let first = "first-observation".to_owned();
+        let mut observations = RecentObservations::default();
+
+        assert!(!observations.observe(first.clone()));
+        assert!(observations.observe(first.clone()));
+        for index in 0..MAX_WEBSOCKET_QUEUE_EVENTS {
+            assert!(!observations.observe(format!("unique-observation-{index}")));
+        }
+
+        assert_eq!(observations.len(), MAX_WEBSOCKET_QUEUE_EVENTS);
+        assert!(!observations.observe(first));
+        assert_eq!(observations.len(), MAX_WEBSOCKET_QUEUE_EVENTS);
+    }
+
+    #[test]
+    fn duplicate_tracking_is_bounded_to_the_recent_queue_bytes() {
+        let mut observations = RecentObservations::default();
+        let first = "a".repeat(MAX_WEBSOCKET_QUEUE_BYTES / 2 + 1);
+        let second = "b".repeat(MAX_WEBSOCKET_QUEUE_BYTES / 2 + 1);
+
+        assert!(!observations.observe(first.clone()));
+        assert!(observations.observe(first.clone()));
+        assert!(!observations.observe(second));
+        assert_eq!(observations.len(), 1);
+        assert!(observations.retained_bytes() <= MAX_WEBSOCKET_QUEUE_BYTES);
+        assert!(!observations.observe(first));
+        assert_eq!(observations.len(), 1);
+        assert!(observations.retained_bytes() <= MAX_WEBSOCKET_QUEUE_BYTES);
     }
 }

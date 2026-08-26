@@ -57,7 +57,7 @@ The concrete WebSocket client applies 8-MiB frame and reassembled-message limits
 
 Each session has a 2,048-event, 8-MiB queue. The next event that would exceed either bound terminates the session as `data_gap`; data is never silently dropped. Polling uses a local arrival cursor and returns at most 256 events, 1 MiB, or five seconds of wait. Byte admission serializes the fixed envelope once and each candidate event once, while retaining exact JSON-size accounting. Reusing a cursor replays the same retained events. Cancelling a poll cancels only that request.
 
-Events retain vendor time and local receive time. Arrival sequence is authoritative. Duplicate and decreasing vendor timestamps are preserved and flagged as `duplicate` and `outOfOrder` rather than discarded or reordered.
+Events retain vendor time and local receive time. Arrival sequence is authoritative. Duplicate and decreasing vendor timestamps are preserved and flagged as `duplicate` and `outOfOrder` rather than discarded or reordered. Duplicate fingerprints use a recent-observation window bounded to 2,048 entries and 8 MiB, so the tracking state remains finite; a recurrence after its fingerprint has aged out is treated as a new observation.
 
 Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication and entitlement failures do not reconnect. Terminal polls retain only the sanitized `authentication`, `entitlement`, `transport`, or `protocol` classification; upstream rejection text is discarded. Heartbeats and data refresh the 75-second liveness deadline.
 
