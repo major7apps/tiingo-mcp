@@ -19,13 +19,15 @@ use tokio::{
     time::{Instant, timeout, timeout_at},
 };
 use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Error as WebSocketError,
+    MaybeTlsStream, WebSocketStream, connect_async_with_config,
+    tungstenite::{Error as WebSocketError, protocol::WebSocketConfig},
 };
 
 use crate::{
     config::{
-        MAX_WEBSOCKET_POLL_BYTES, MAX_WEBSOCKET_POLL_EVENTS, MAX_WEBSOCKET_SESSIONS,
-        MAX_WEBSOCKET_SYMBOLS, WEBSOCKET_ACK_TIMEOUT, WEBSOCKET_POLL_TIMEOUT,
+        MAX_WEBSOCKET_MESSAGE_BYTES, MAX_WEBSOCKET_POLL_BYTES, MAX_WEBSOCKET_POLL_EVENTS,
+        MAX_WEBSOCKET_SESSIONS, MAX_WEBSOCKET_SYMBOLS, WEBSOCKET_ACK_TIMEOUT,
+        WEBSOCKET_POLL_TIMEOUT,
     },
     error::TiingoError,
     websocket::protocol::{Authorization, ProtocolCodec, Service},
@@ -33,6 +35,9 @@ use crate::{
 
 const CAPABILITY: &str = "WebSocket market data";
 const MAX_RETAINED_TERMINAL_SESSIONS: usize = MAX_WEBSOCKET_SESSIONS;
+
+#[cfg(test)]
+static POLL_RESULT_SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
 
 mod worker;
 
@@ -90,7 +95,10 @@ impl TiingoConnector {
     }
 
     async fn connect(&self, service: Service) -> Result<ClientSocket, TiingoError> {
-        connect_async(self.endpoint(service))
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
+            .max_frame_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES));
+        connect_async_with_config(self.endpoint(service), Some(config), false)
             .await
             .map(|(socket, _)| socket)
             .map_err(map_connect_error)
@@ -143,6 +151,7 @@ struct Session {
 
 struct SessionData {
     status: SubscriptionStatus,
+    terminal_error: Option<TerminalErrorKind>,
     events: VecDeque<MarketDataEvent>,
     queue_bytes: usize,
     next_sequence: u64,
@@ -200,6 +209,15 @@ pub enum SubscriptionStatus {
     DataGap,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalErrorKind {
+    Authentication,
+    Entitlement,
+    Transport,
+    Protocol,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartResult {
@@ -241,6 +259,8 @@ impl fmt::Debug for MarketDataEvent {
 pub struct PollResult {
     pub id: String,
     pub state: SubscriptionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_error: Option<TerminalErrorKind>,
     pub events: Vec<MarketDataEvent>,
 }
 
@@ -374,6 +394,7 @@ impl MarketDataRegistry {
                 join: Mutex::new(None),
                 data: Mutex::new(SessionData {
                     status: SubscriptionStatus::Starting,
+                    terminal_error: None,
                     events: VecDeque::new(),
                     queue_bytes: 0,
                     next_sequence: 1,
@@ -650,6 +671,18 @@ async fn join_session(session: &Session) {
 }
 
 async fn set_status(session: &Session, status: SubscriptionStatus) {
+    set_status_and_terminal_error(session, status, None).await;
+}
+
+async fn set_terminal_failure(session: &Session, terminal_error: TerminalErrorKind) {
+    set_status_and_terminal_error(session, SubscriptionStatus::Failed, Some(terminal_error)).await;
+}
+
+async fn set_status_and_terminal_error(
+    session: &Session,
+    status: SubscriptionStatus,
+    terminal_error: Option<TerminalErrorKind>,
+) {
     {
         let mut data = session.data.lock().await;
         if is_terminal(status) && !is_terminal(data.status) {
@@ -659,6 +692,7 @@ async fn set_status(session: &Session, status: SubscriptionStatus) {
                 .store(terminal_order, Ordering::Release);
         }
         data.status = status;
+        data.terminal_error = terminal_error;
     }
     if is_terminal(status) && session.active_slot_held.swap(false, Ordering::AcqRel) {
         session.active_sessions.fetch_sub(1, Ordering::AcqRel);
@@ -700,26 +734,40 @@ async fn poll_snapshot(
     let mut result = PollResult {
         id: session_id.to_owned(),
         state: data.status,
+        terminal_error: data.terminal_error,
         events: Vec::new(),
     };
+    let mut serialized_len = serialize_poll_result(&result)?.len();
     for event in data
         .events
         .iter()
         .filter(|event| event.sequence > after_sequence)
         .take(limit)
     {
-        result.events.push(event.clone());
-        let serialized_len = serde_json::to_vec(&result)
+        let event_len = serde_json::to_vec(event)
             .map_err(|_| TiingoError::WebSocketProtocol {
-                reason: "poll response could not be encoded",
+                reason: "poll event could not be encoded",
             })?
             .len();
-        if serialized_len > MAX_WEBSOCKET_POLL_BYTES {
-            result.events.pop();
+        let separator_len = usize::from(!result.events.is_empty());
+        let candidate_len = serialized_len
+            .saturating_add(separator_len)
+            .saturating_add(event_len);
+        if candidate_len > MAX_WEBSOCKET_POLL_BYTES {
             break;
         }
+        serialized_len = candidate_len;
+        result.events.push(event.clone());
     }
     Ok(result)
+}
+
+fn serialize_poll_result(result: &PollResult) -> Result<Vec<u8>, TiingoError> {
+    #[cfg(test)]
+    POLL_RESULT_SERIALIZATIONS.fetch_add(1, Ordering::Relaxed);
+    serde_json::to_vec(result).map_err(|_| TiingoError::WebSocketProtocol {
+        reason: "poll response could not be encoded",
+    })
 }
 
 async fn touch_session(session: &Session) {
@@ -800,5 +848,69 @@ fn map_connect_error(error: WebSocketError) -> TiingoError {
         _ => TiingoError::Transport {
             capability: CAPABILITY,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn poll_snapshot_serializes_whole_wrapper_once_for_maximum_page() {
+        let events = (1..=MAX_WEBSOCKET_POLL_EVENTS)
+            .map(|sequence| MarketDataEvent {
+                sequence: sequence as u64,
+                received_at: Utc::now(),
+                vendor_timestamp: None,
+                symbol: None,
+                duplicate: false,
+                out_of_order: false,
+                payload: serde_json::json!({"messageType": "U", "value": sequence}),
+            })
+            .collect::<VecDeque<_>>();
+        let (cancel, _) = watch::channel(false);
+        let (commands, _) = mpsc::channel(1);
+        let now = Instant::now();
+        let session = Session {
+            cancel,
+            commands,
+            mutation: Mutex::new(()),
+            join: Mutex::new(None),
+            data: Mutex::new(SessionData {
+                status: SubscriptionStatus::Active,
+                terminal_error: None,
+                events,
+                queue_bytes: 0,
+                next_sequence: MAX_WEBSOCKET_POLL_EVENTS as u64 + 1,
+                seen_observations: HashSet::new(),
+                latest_timestamp_by_symbol: HashMap::new(),
+                symbols: vec!["AAPL".into()],
+                threshold_level: 6,
+                started_at: now,
+                last_access: now,
+            }),
+            notify: Notify::new(),
+            active_sessions: Arc::new(AtomicUsize::new(1)),
+            active_slot_held: AtomicBool::new(true),
+            terminal_counter: Arc::new(AtomicU64::new(0)),
+            terminal_order: AtomicU64::new(0),
+        };
+
+        POLL_RESULT_SERIALIZATIONS.store(0, Ordering::Relaxed);
+        let page = poll_snapshot(
+            "00000000000000000000000000000000",
+            &session,
+            0,
+            MAX_WEBSOCKET_POLL_EVENTS,
+        )
+        .await
+        .expect("maximum poll page is encodable");
+
+        assert_eq!(page.events.len(), MAX_WEBSOCKET_POLL_EVENTS);
+        assert_eq!(
+            POLL_RESULT_SERIALIZATIONS.load(Ordering::Relaxed),
+            1,
+            "poll byte admission must not reserialize the growing result"
+        );
     }
 }

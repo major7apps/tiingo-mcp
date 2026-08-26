@@ -9,11 +9,13 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use tiingo_mcp::config::MAX_WEBSOCKET_MESSAGE_BYTES;
+use tiingo_mcp::error::TiingoError;
 use tiingo_mcp::websocket::{
     protocol::Service,
     registry::{
         MarketDataEvent, MarketDataRegistry, PollResult, ReceiveClock, ReconnectClock,
-        StartRequest, SubscriptionStatus, TiingoConnector, UpdateRequest,
+        StartRequest, SubscriptionStatus, TerminalErrorKind, TiingoConnector, UpdateRequest,
     },
 };
 use tokio::net::TcpListener;
@@ -501,6 +503,222 @@ async fn poll_reassembles_fragmented_text_and_replays_consecutive_messages_in_ar
     server.await.expect("mock server exits cleanly");
 }
 
+async fn assert_oversized_wire_frames_are_terminal(frames: Vec<Frame>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "bounded-wire-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send acknowledgement");
+        for frame in frames {
+            if socket.send(Message::Frame(frame)).await.is_err() {
+                break;
+            }
+        }
+        drop(socket);
+        tokio::time::timeout(Duration::from_millis(750), listener.accept())
+            .await
+            .is_ok()
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+
+    let terminal = tokio::time::timeout(Duration::from_secs(1), registry.poll(&started.id, 0))
+        .await
+        .expect("oversized wire payload becomes terminal promptly")
+        .expect("terminal state remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(terminal.terminal_error, Some(TerminalErrorKind::Protocol));
+    assert!(terminal.events.is_empty());
+    assert!(
+        !server.await.expect("mock server joined"),
+        "oversized wire payload must not reconnect"
+    );
+    registry.shutdown().await;
+}
+
+#[tokio::test]
+async fn oversized_single_wire_frame_is_terminal_before_fragment_completion() {
+    assert_oversized_wire_frames_are_terminal(vec![Frame::message(
+        vec![b'x'; MAX_WEBSOCKET_MESSAGE_BYTES + 1],
+        OpCode::Data(Data::Text),
+        false,
+    )])
+    .await;
+}
+
+#[tokio::test]
+async fn oversized_fragmented_wire_message_is_terminal_before_final_fragment() {
+    let first_fragment_bytes = MAX_WEBSOCKET_MESSAGE_BYTES / 2;
+    assert_oversized_wire_frames_are_terminal(vec![
+        Frame::message(
+            vec![b'x'; first_fragment_bytes],
+            OpCode::Data(Data::Text),
+            false,
+        ),
+        Frame::message(
+            vec![b'x'; MAX_WEBSOCKET_MESSAGE_BYTES - first_fragment_bytes + 1],
+            OpCode::Data(Data::Continue),
+            false,
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn oversized_initial_ack_is_rejected_as_protocol_without_reconnect() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        let _ = socket
+            .send(Message::Frame(Frame::message(
+                vec![b'x'; MAX_WEBSOCKET_MESSAGE_BYTES + 1],
+                OpCode::Data(Data::Text),
+                false,
+            )))
+            .await;
+        drop(socket);
+        tokio::time::timeout(Duration::from_millis(750), listener.accept())
+            .await
+            .is_ok()
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+
+    let error = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect_err("oversized initial acknowledgement must fail start");
+    assert!(matches!(error, TiingoError::WebSocketProtocol { .. }));
+    assert!(
+        !server.await.expect("mock server joined"),
+        "oversized initial acknowledgement must not reconnect"
+    );
+    registry.shutdown().await;
+}
+
+#[tokio::test]
+async fn oversized_wire_frame_during_update_ack_is_terminal_protocol_without_reconnect() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "update-wire-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send acknowledgement");
+        socket
+            .next()
+            .await
+            .expect("update command")
+            .expect("valid update command");
+        let _ = socket
+            .send(Message::Frame(Frame::message(
+                vec![b'x'; MAX_WEBSOCKET_MESSAGE_BYTES + 1],
+                OpCode::Data(Data::Text),
+                false,
+            )))
+            .await;
+        drop(socket);
+        tokio::time::timeout(Duration::from_millis(750), listener.accept())
+            .await
+            .is_ok()
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+
+    let error = registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["MSFT".into()],
+                remove_symbols: Vec::new(),
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect_err("oversized update response fails the mutation");
+    assert_eq!(error.payload().kind, "websocket_protocol");
+    let terminal = registry
+        .poll(&started.id, u64::MAX)
+        .await
+        .expect("terminal state remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(terminal.terminal_error, Some(TerminalErrorKind::Protocol));
+    assert!(
+        !server.await.expect("mock server joined"),
+        "oversized update response must not reconnect"
+    );
+    registry.shutdown().await;
+}
+
 #[tokio::test]
 async fn poll_caps_deterministic_replay_by_event_count_and_serialized_bytes() {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -872,7 +1090,7 @@ async fn update_ack_keeps_published_replay_bytes_and_duplicate_classification_st
     let replay_bytes = serde_json::to_vec(&replay.events[0]).expect("serialize replayed event");
 
     assert_eq!(before.events[0].payload["data"][2], 5.0);
-    assert_eq!(duplicate.events[0].payload["data"][2], "[REDACTED]");
+    assert_eq!(duplicate.events[0].payload["data"][2], 5.0);
     assert!(
         replay_bytes == before_bytes && duplicate.events[0].duplicate,
         "acknowledgement must not mutate replay bytes or stale duplicate truth; replay_stable={}, duplicate={}",
@@ -1663,6 +1881,7 @@ async fn disconnect_reconnects_five_times_with_exact_backoff_and_fresh_subscribe
         .expect("reconnect exhaustion becomes terminal promptly")
         .expect("reconnect exhaustion remains inspectable");
     assert_eq!(failed.state, SubscriptionStatus::Failed);
+    assert_eq!(failed.terminal_error, Some(TerminalErrorKind::Transport));
 
     registry.shutdown().await;
 }
@@ -3713,6 +3932,102 @@ async fn retained_events_redact_numeric_acknowledged_upstream_ids() {
 }
 
 #[tokio::test]
+async fn validated_market_array_preserves_numeric_prices_and_sizes_equal_to_upstream_id() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let market_data = json!([
+        "T",
+        "2026-08-25T14:00:00Z",
+        1_777_123_200_000_000_000_i64,
+        "AAPL",
+        5,
+        5.0,
+        5.0,
+        5.0,
+        5,
+        5.0,
+        5,
+        0,
+        0,
+        0,
+        5,
+        5
+    ]);
+    let expected_market_data = market_data.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": 5},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "A",
+                    "service": "iex",
+                    "data": market_data,
+                    "subscriptionId": 5,
+                    "nested": {"subscriptionId": 5},
+                    "textualEcho": "subscription-5-active"
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send validated market event");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: Some(5),
+            confirm_iex_market_data_agreement: true,
+        })
+        .await
+        .expect("subscription starts");
+    let poll = registry
+        .poll(&started.id, 0)
+        .await
+        .expect("validated market event is retained");
+
+    assert_eq!(poll.events[0].payload["data"], expected_market_data);
+    assert_eq!(poll.events[0].payload["subscriptionId"], "[REDACTED]");
+    assert_eq!(
+        poll.events[0].payload["nested"]["subscriptionId"],
+        "[REDACTED]"
+    );
+    assert_eq!(
+        poll.events[0].payload["textualEcho"],
+        "subscription-[REDACTED]-active"
+    );
+
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+}
+
+#[tokio::test]
 async fn string_upstream_id_redaction_preserves_adjacent_market_text() {
     let event = poll_single_raw_event(
         json!("ABC5"),
@@ -3882,6 +4197,7 @@ async fn exact_active_poll_limit_is_rejected_when_terminal_wrapper_would_exceed_
     let active_without_padding = serde_json::to_vec(&PollResult {
         id: "0".repeat(32),
         state: SubscriptionStatus::Active,
+        terminal_error: None,
         events: vec![event_without_padding.clone()],
     })
     .expect("serialize exact-bound fixture")
@@ -3893,6 +4209,7 @@ async fn exact_active_poll_limit_is_rejected_when_terminal_wrapper_would_exceed_
         serde_json::to_vec(&PollResult {
             id: "0".repeat(32),
             state: SubscriptionStatus::Active,
+            terminal_error: None,
             events: vec![exact_event.clone()],
         })
         .expect("serialize active boundary")
@@ -3903,6 +4220,7 @@ async fn exact_active_poll_limit_is_rejected_when_terminal_wrapper_would_exceed_
         serde_json::to_vec(&PollResult {
             id: "0".repeat(32),
             state: SubscriptionStatus::DataGap,
+            terminal_error: None,
             events: vec![exact_event],
         })
         .expect("serialize terminal boundary")
@@ -4007,6 +4325,7 @@ async fn redaction_growth_data_gap_preserves_prior_exact_cursor_replay() {
     let redacted_base_bytes = serde_json::to_vec(&PollResult {
         id: "0".repeat(32),
         state: SubscriptionStatus::Reconnecting,
+        terminal_error: None,
         events: vec![redacted_without_padding.clone()],
     })
     .expect("serialize redacted boundary fixture")
@@ -4018,6 +4337,7 @@ async fn redaction_growth_data_gap_preserves_prior_exact_cursor_replay() {
         serde_json::to_vec(&PollResult {
             id: "0".repeat(32),
             state: SubscriptionStatus::Reconnecting,
+            terminal_error: None,
             events: vec![redacted_event.clone()],
         })
         .expect("serialize redacted over-bound fixture")
@@ -4030,6 +4350,7 @@ async fn redaction_growth_data_gap_preserves_prior_exact_cursor_replay() {
         serde_json::to_vec(&PollResult {
             id: "0".repeat(32),
             state: SubscriptionStatus::Reconnecting,
+            terminal_error: None,
             events: vec![unredacted_event],
         })
         .expect("serialize unredacted boundary fixture")
@@ -4226,11 +4547,91 @@ async fn entitlement_rejection_after_activation_is_terminal_sanitized_and_not_re
             .expect("entitlement rejection becomes terminal promptly")
             .expect("terminal state remains inspectable");
     assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(
+        terminal.terminal_error,
+        Some(TerminalErrorKind::Entitlement)
+    );
     let snapshots = format!("{terminal:?} {registry:?}");
     assert!(!snapshots.contains("test-key"));
     assert!(!snapshots.contains("upstream-secret"));
     assert!(requested_delays.try_recv().is_err());
     assert!(server.await.expect("mock server exits"));
+    registry.shutdown().await;
+}
+
+#[tokio::test]
+async fn authentication_rejection_after_activation_retains_only_sanitized_classification() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("subscribe command")
+            .expect("valid subscribe command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "auth-upstream-secret"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send acknowledgement");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "auth-upstream-secret"},
+                    "response": {
+                        "code": 401,
+                        "message": "invalid test-key and auth-upstream-secret"
+                    }
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send authentication rejection");
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_))) {
+                break;
+            }
+        }
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+
+    let terminal =
+        tokio::time::timeout(Duration::from_secs(1), registry.poll(&started.id, u64::MAX))
+            .await
+            .expect("authentication rejection becomes terminal promptly")
+            .expect("terminal state remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(
+        terminal.terminal_error,
+        Some(TerminalErrorKind::Authentication)
+    );
+    let serialized = serde_json::to_string(&terminal).expect("serialize terminal poll");
+    assert!(!serialized.contains("test-key"));
+    assert!(!serialized.contains("auth-upstream-secret"));
+
+    server.await.expect("mock server exits");
     registry.shutdown().await;
 }
 
@@ -4299,6 +4700,7 @@ async fn malformed_binary_message_is_terminal_leak_free_and_not_retried() {
             .expect("malformed message becomes terminal promptly")
             .expect("terminal state remains inspectable");
     assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(terminal.terminal_error, Some(TerminalErrorKind::Protocol));
     let snapshots = format!("{terminal:?} {registry:?}");
     assert!(!snapshots.contains("test-key"));
     assert!(!snapshots.contains("upstream-secret"));

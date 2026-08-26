@@ -1048,13 +1048,24 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
 }
 
 #[tokio::test]
-async fn websocket_entitlement_rejection_is_a_sanitized_mcp_tool_error() {
+async fn post_activation_entitlement_is_retained_in_sanitized_mcp_poll_output() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("ws://{}", listener.local_addr().unwrap());
     let websocket = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
         socket.next().await.unwrap().unwrap();
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "upstream-secret"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
         socket
             .send(Message::text(
                 serde_json::json!({
@@ -1079,7 +1090,7 @@ async fn websocket_entitlement_rejection_is_a_sanitized_mcp_tool_error() {
     ))
     .await;
 
-    let result = connection
+    let started = connection
         .client
         .call_tool(
             CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
@@ -1088,16 +1099,25 @@ async fn websocket_entitlement_rejection_is_a_sanitized_mcp_tool_error() {
         )
         .await
         .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let text = result.content[0].as_text().unwrap();
-    let payload = serde_json::from_str::<serde_json::Value>(&text.text).unwrap();
-    assert_eq!(payload["kind"], "entitlement");
-    assert_eq!(
-        result.structured_content.as_ref().unwrap()["error"],
-        payload
-    );
-    let serialized = serde_json::to_string(&result).unwrap();
+    let started = success_data("start_market_data_subscription", &started);
+    let subscription_id = started["id"].as_str().unwrap();
+    let polled = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("poll_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "after_sequence": 0,
+                    "max_wait_ms": 1000
+                }),
+            )),
+        )
+        .await
+        .unwrap();
+    let polled = success_data("poll_market_data_subscription", &polled);
+    assert_eq!(polled["state"], "failed");
+    assert_eq!(polled["terminalError"], "entitlement");
+    let serialized = serde_json::to_string(&polled).unwrap();
     assert!(!serialized.contains("mcp-ws-secret"));
     assert!(!serialized.contains("upstream-secret"));
 

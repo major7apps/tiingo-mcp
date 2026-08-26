@@ -7,7 +7,7 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
     time::{Instant, sleep_until, timeout},
 };
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 
 use crate::{
     config::{
@@ -24,7 +24,8 @@ use crate::{
 
 use super::{
     CAPABILITY, ClientSocket, MarketDataEvent, PollResult, ReceiveClock, ReconnectClock, Session,
-    SubscriptionStatus, TiingoConnector, WorkerCommand, set_status,
+    SubscriptionStatus, TerminalErrorKind, TiingoConnector, WorkerCommand, set_status,
+    set_terminal_failure,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -169,7 +170,11 @@ pub(super) async fn run_worker(
                             }
                             Controlled::Completed(Err(error)) => {
                                 if session.data.lock().await.status != SubscriptionStatus::DataGap {
-                                    set_status(&session, SubscriptionStatus::Failed).await;
+                                    set_terminal_failure(
+                                        &session,
+                                        terminal_error_kind(&error),
+                                    )
+                                    .await;
                                 }
                                 let _ = response.send(Err(error));
                                 bounded_close_socket(&mut socket).await;
@@ -207,8 +212,8 @@ pub(super) async fn run_worker(
                                 bounded_close_socket(&mut socket).await;
                                 return;
                             }
-                            Err(_) => {
-                                set_status(&session, SubscriptionStatus::Failed).await;
+                            Err(error) => {
+                                set_terminal_failure(&session, terminal_error_kind(&error)).await;
                                 bounded_close_socket(&mut socket).await;
                                 return;
                             }
@@ -255,7 +260,12 @@ pub(super) async fn run_worker(
                         }
                     }
                     Some(Ok(Message::Binary(_))) => {
-                        set_status(&session, SubscriptionStatus::Failed).await;
+                        set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
+                        bounded_close_socket(&mut socket).await;
+                        return;
+                    }
+                    Some(Err(WebSocketError::Capacity(_))) => {
+                        set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
                         bounded_close_socket(&mut socket).await;
                         return;
                     }
@@ -295,8 +305,8 @@ pub(super) async fn run_worker(
                 set_status(&session, SubscriptionStatus::Expired).await;
                 return;
             }
-            ReconnectOutcome::Failed => {
-                set_status(&session, SubscriptionStatus::Failed).await;
+            ReconnectOutcome::Failed(terminal_error) => {
+                set_terminal_failure(&session, terminal_error).await;
                 return;
             }
         }
@@ -329,7 +339,7 @@ enum ReconnectOutcome {
     Connected(Box<ClientSocket>, SubscriptionId),
     Stopped,
     Expired,
-    Failed,
+    Failed(TerminalErrorKind),
 }
 
 enum Controlled<T> {
@@ -416,13 +426,15 @@ async fn reconnect_connection(
             Ok((socket, subscription_id)) => {
                 return ReconnectOutcome::Connected(Box::new(socket), subscription_id);
             }
-            Err(TiingoError::Authentication { .. })
-            | Err(TiingoError::Entitlement { .. })
-            | Err(TiingoError::WebSocketProtocol { .. }) => return ReconnectOutcome::Failed,
+            Err(error @ TiingoError::Authentication { .. })
+            | Err(error @ TiingoError::Entitlement { .. })
+            | Err(error @ TiingoError::WebSocketProtocol { .. }) => {
+                return ReconnectOutcome::Failed(terminal_error_kind(&error));
+            }
             Err(_) => {}
         }
     }
-    ReconnectOutcome::Failed
+    ReconnectOutcome::Failed(TerminalErrorKind::Transport)
 }
 
 async fn expiry_deadline(session: &Session) -> Instant {
@@ -757,7 +769,12 @@ async fn queue_text_message(
         serde_json::to_string(&value).map_err(|_| TiingoError::WebSocketProtocol {
             reason: "market event could not be encoded",
         })?;
-    redact_sensitive_value(&mut value, authorization, acknowledged_subscription_ids);
+    redact_sensitive_value(
+        &mut value,
+        authorization,
+        acknowledged_subscription_ids,
+        matches!(&received.message, ServerMessage::Market(_)),
+    );
     let (vendor_timestamp, symbol) = message_identity(&received.message);
 
     let mut data = session.data.lock().await;
@@ -807,7 +824,8 @@ async fn queue_text_message(
         .len();
     let single_event_poll_bytes = serde_json::to_vec(&PollResult {
         id: "0".repeat(32),
-        state: SubscriptionStatus::Reconnecting,
+        state: SubscriptionStatus::Failed,
+        terminal_error: Some(TerminalErrorKind::Authentication),
         events: vec![event.clone()],
     })
     .map_err(|_| TiingoError::WebSocketProtocol {
@@ -834,6 +852,7 @@ fn redact_sensitive_value(
     value: &mut Value,
     authorization: &Authorization,
     acknowledged_subscription_ids: &[SubscriptionId],
+    preserve_root_market_data_numbers: bool,
 ) {
     match value {
         Value::String(text) => {
@@ -841,7 +860,7 @@ fn redact_sensitive_value(
         }
         Value::Array(values) => {
             for value in values {
-                redact_sensitive_value(value, authorization, acknowledged_subscription_ids);
+                redact_sensitive_value(value, authorization, acknowledged_subscription_ids, false);
             }
         }
         Value::Object(values) => {
@@ -849,11 +868,18 @@ fn redact_sensitive_value(
             for (key, mut value) in original {
                 if key.eq_ignore_ascii_case("subscriptionId") {
                     value = Value::String("[REDACTED]".into());
+                } else if preserve_root_market_data_numbers && key == "data" {
+                    redact_market_data_value(
+                        &mut value,
+                        authorization,
+                        acknowledged_subscription_ids,
+                    );
                 } else {
                     redact_sensitive_value(
                         &mut value,
                         authorization,
                         acknowledged_subscription_ids,
+                        false,
                     );
                 }
                 values.insert(
@@ -878,6 +904,27 @@ fn redact_sensitive_value(
     }
 }
 
+fn redact_market_data_value(
+    value: &mut Value,
+    authorization: &Authorization,
+    acknowledged_subscription_ids: &[SubscriptionId],
+) {
+    match value {
+        Value::String(text) => {
+            *text = redact_sensitive_text(text, authorization, acknowledged_subscription_ids);
+        }
+        Value::Array(values) => {
+            for value in values {
+                redact_market_data_value(value, authorization, acknowledged_subscription_ids);
+            }
+        }
+        Value::Object(_) => {
+            redact_sensitive_value(value, authorization, acknowledged_subscription_ids, false)
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
 fn redact_sensitive_text(
     value: &str,
     authorization: &Authorization,
@@ -892,6 +939,26 @@ fn redact_sensitive_text(
         redacted = redact_bounded_secret(&redacted, &secret);
     }
     redacted
+}
+
+fn terminal_error_kind(error: &TiingoError) -> TerminalErrorKind {
+    match error {
+        TiingoError::Authentication { .. } => TerminalErrorKind::Authentication,
+        TiingoError::Entitlement { .. } => TerminalErrorKind::Entitlement,
+        TiingoError::Transport { .. } | TiingoError::Timeout { .. } => TerminalErrorKind::Transport,
+        _ => TerminalErrorKind::Protocol,
+    }
+}
+
+fn map_socket_receive_error(error: WebSocketError) -> TiingoError {
+    match error {
+        WebSocketError::Capacity(_) => TiingoError::WebSocketProtocol {
+            reason: "WebSocket message exceeded the configured size limit",
+        },
+        _ => TiingoError::Transport {
+            capability: CAPABILITY,
+        },
+    }
 }
 
 fn remember_subscription_id(
@@ -937,9 +1004,7 @@ async fn wait_for_update_ack(
             .ok_or(TiingoError::Transport {
                 capability: CAPABILITY,
             })?
-            .map_err(|_| TiingoError::Transport {
-                capability: CAPABILITY,
-            })?;
+            .map_err(map_socket_receive_error)?;
         match message {
             Message::Text(payload) => {
                 let received_at = clock.now();
@@ -1026,9 +1091,7 @@ async fn wait_for_ack(
             .ok_or(TiingoError::Transport {
                 capability: CAPABILITY,
             })?
-            .map_err(|_| TiingoError::Transport {
-                capability: CAPABILITY,
-            })?;
+            .map_err(map_socket_receive_error)?;
         match message {
             Message::Text(payload) => {
                 let received = codec.decode(payload.as_bytes(), chrono::Utc::now())?;
