@@ -53,11 +53,13 @@ active -> transport or 75-second liveness failure -> bounded reconnect -> active
 
 `start` accepts 1–100 explicit symbols and at most eight process-local sessions. It generates a 32-character lowercase hexadecimal local ID and waits no more than five seconds for the initial `I` acknowledgement. IEX defaults to threshold 6; levels 0 and 5 require explicit direct-agreement confirmation. Consolidated equity defaults to 6 and accepts only 4 or 6.
 
-Each session has a 2,048-event, 8-MiB queue. The next event that would exceed either bound terminates the session as `data_gap`; data is never silently dropped. Polling uses a local arrival cursor and returns at most 256 events, 1 MiB, or five seconds of wait. Reusing a cursor replays the same retained events. Cancelling a poll cancels only that request.
+The concrete WebSocket client applies 8-MiB frame and reassembled-message limits before protocol parsing, including during initial and update acknowledgements. Capacity failures are terminal protocol failures and do not reconnect.
+
+Each session has a 2,048-event, 8-MiB queue. The next event that would exceed either bound terminates the session as `data_gap`; data is never silently dropped. Polling uses a local arrival cursor and returns at most 256 events, 1 MiB, or five seconds of wait. Byte admission serializes the fixed envelope once and each candidate event once, while retaining exact JSON-size accounting. Reusing a cursor replays the same retained events. Cancelling a poll cancels only that request.
 
 Events retain vendor time and local receive time. Arrival sequence is authoritative. Duplicate and decreasing vendor timestamps are preserved and flagged as `duplicate` and `outOfOrder` rather than discarded or reordered.
 
-Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication and entitlement failures do not reconnect. Heartbeats and data refresh the 75-second liveness deadline.
+Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication and entitlement failures do not reconnect. Terminal polls retain only the sanitized `authentication`, `entitlement`, `transport`, or `protocol` classification; upstream rejection text is discarded. Heartbeats and data refresh the 75-second liveness deadline.
 
 A session expires after 30 minutes absolute lifetime or five minutes without a registry call. Updates may add or remove symbols; changing threshold requires stop/start. Stop is idempotent and performs best-effort unsubscribe, socket close, cancellation, and join.
 
@@ -65,6 +67,6 @@ A session expires after 30 minutes absolute lifetime or five minutes without a r
 
 The registry owns every worker `JoinHandle`. A failed or cancelled start cleans up its unpublished worker. Stop awaits cleanup, and `run_stdio_with` shuts down and joins the whole registry whenever initialization fails, the service is cancelled, or stdin closes.
 
-Stdout is reserved for MCP protocol bytes. Tracing and diagnostics go to stderr. Closing stdin must terminate promptly without diagnostic or credential noise on stdout.
+Stdout is reserved for MCP protocol bytes. Tracing and diagnostics go to stderr. The dependency `log` bridge is disabled so a dependency trace target cannot emit raw WebSocket frames around the application's redaction boundary. Closing stdin must terminate promptly without diagnostic or credential noise on stdout.
 
 See [API_SURFACE.md](API_SURFACE.md) for routes and access classes and [QUALITY.md](QUALITY.md) for the tests that enforce these boundaries.

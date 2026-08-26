@@ -50,7 +50,7 @@ Test/access classes are `D` (deterministic-testable), `L` (bounded read-only liv
 | `get_splits` | `GET /tiingo/corporate-actions/{ticker}/splits` | beta | Early-release and entitlement-dependent | D, L, E, Q |
 | `get_splits_by_ex_date` | `GET /tiingo/corporate-actions/splits?exDate=...` | beta | Early-release, entitlement-dependent; may include announced/cancelled future actions | D, L, E, Q |
 | `start_market_data_subscription` | IEX `wss://api.tiingo.com/iex` or consolidated `wss://api.tiingo.com/equity/intraday` | lifecycle | IEX 6 default; 0/5 need direct-agreement confirmation. Consolidated accepts 4/6. | D, L, E, Q |
-| `poll_market_data_subscription` | Existing local subscription queue | lifecycle | Bounded cursor poll; no new upstream subscription | D, L, Q |
+| `poll_market_data_subscription` | Existing local subscription queue | lifecycle | Bounded cursor poll with sanitized terminal classification; no new upstream subscription | D, L, Q |
 | `update_market_data_subscription` | Upstream update using acknowledged subscription ID | lifecycle | Add/remove explicit symbols; threshold changes require stop/start | D, L, Q |
 | `stop_market_data_subscription` | Best-effort upstream unsubscribe and local cleanup | lifecycle | Idempotent; never exposes upstream subscription ID | D, L, Q |
 

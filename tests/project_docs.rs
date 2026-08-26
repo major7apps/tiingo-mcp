@@ -505,4 +505,34 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
         "ARCHITECTURE.md must scope the transport statement to this server"
     );
     assert!(!architecture.contains("MCP uses stdio only."));
+
+    let readme = read_root_file("README.md");
+    assert!(
+        readme.contains("`terminalError`"),
+        "README.md must document sanitized terminal WebSocket classifications"
+    );
+    assert!(
+        architecture.contains("frame and reassembled-message limits"),
+        "ARCHITECTURE.md must document concrete socket-level message bounds"
+    );
+    assert!(
+        architecture.contains("serializes the fixed envelope once"),
+        "ARCHITECTURE.md must document linear poll byte admission"
+    );
+
+    assert!(
+        api_surface.contains("sanitized terminal classification"),
+        "API_SURFACE.md must identify terminal poll classification"
+    );
+    let quality = read_root_file("QUALITY.md");
+    assert!(
+        quality.contains("`tests/websocket_logging.rs`"),
+        "QUALITY.md must map the dependency trace-leak regression"
+    );
+
+    let changelog = read_root_file("CHANGELOG.md");
+    assert!(
+        changelog.contains("socket-level 8-MiB frame/message limits"),
+        "CHANGELOG.md must record the public WebSocket hardening"
+    );
 }

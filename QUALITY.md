@@ -39,6 +39,7 @@ Release preparation also requires `dist plan`. A pull request is ready only when
 - `tests/mcp_tools.rs` calls the real in-memory RMCP boundary and checks JSON text, structured data, validation, consistency, and deterministic latency.
 - `tests/websocket_protocol.rs` covers official message/frame shapes and malformed or unknown input.
 - `tests/websocket_lifecycle.rs` covers validation, queue limits, cursor replay, data gaps, reconnects, liveness, expiry, redaction, cancellation, and worker cleanup with controlled clocks/sockets.
+- `tests/websocket_logging.rs` runs a child process against a concrete mock socket with dependency trace logging requested and proves credentials and upstream subscription IDs never reach stdout or stderr.
 - `tests/mcp_resources.rs`, `tests/mcp_prompts.rs`, and `tests/project_docs.rs` enforce reference validity and the public resource/document surface.
 - `tests/stdio_process.rs` proves initialization, cancellation, EOF shutdown, and stdout purity in a child process.
 
@@ -62,7 +63,7 @@ Warm deterministic paths before sampling. Report a latency distribution as `coun
 
 ## Credential and protocol safety
 
-Tests must prove that API keys, authorization headers, upstream subscription IDs, and token-bearing error details never appear in debug output, logs, retained events, MCP text, structured content, or stdout. Only MCP protocol bytes go to stdout; diagnostics go to stderr. Recoverable failures keep sanitized legacy JSON text and set MCP `isError: true`.
+Tests must prove that API keys, authorization headers, upstream subscription IDs, and token-bearing error details never appear in debug output, dependency trace logs, retained events, MCP text, structured content, or stdout. Only MCP protocol bytes go to stdout; diagnostics go to stderr. Recoverable failures keep sanitized legacy JSON text and set MCP `isError: true`; terminal WebSocket state exposes only a sanitized classification.
 
 ## Documentation freshness
 

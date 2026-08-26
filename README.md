@@ -178,7 +178,7 @@ TIINGO_API_KEY=your-api-key-here tiingo-mcp
 | Tool | Description |
 |---|---|
 | `start_market_data_subscription` | Start one bounded IEX or consolidated-equity upstream subscription |
-| `poll_market_data_subscription` | Poll retained events by local arrival sequence with finite limits/wait |
+| `poll_market_data_subscription` | Poll retained events by local arrival sequence with finite limits/wait; terminal sessions include a sanitized `terminalError` classification |
 | `update_market_data_subscription` | Add or remove explicit symbols on an active subscription |
 | `stop_market_data_subscription` | Idempotently unsubscribe, close, cancel, and join the worker |
 
@@ -221,7 +221,7 @@ The server exposes static reference data without making Tiingo API calls.
 
 ## Results and errors
 
-Successful tool calls return both a JSON text content block for older clients and MCP structured content. Recoverable failures are returned as MCP tool errors with a concise, sanitized JSON text block. The client retries only safe transient failures, limits responses to 8 MiB, and never exposes the API key or authorization header in client-visible errors.
+Successful tool calls return both a JSON text content block for older clients and MCP structured content. Recoverable failures are returned as MCP tool errors with a concise, sanitized JSON text block. A terminal WebSocket poll reports only `authentication`, `entitlement`, `transport`, or `protocol` in `terminalError`; it never retains Tiingo's raw rejection text. The client retries only safe transient failures, limits responses to 8 MiB, and never exposes the API key or authorization header in client-visible errors.
 
 ## Development
 

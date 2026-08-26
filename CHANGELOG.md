@@ -4,7 +4,7 @@
 
 ### API surface
 
-- Added 17 REST tools for bulk EOD refresh, lifecycle metadata, all-market IEX and batch forex quotes, consolidated equity and BOATS, funds, Search, Crypto Yield, and cross-ticker corporate actions while preserving all 17 original tool descriptors.
+- Added 17 REST tools for bulk EOD refresh, lifecycle metadata, all-market IEX and batch forex quotes, consolidated equity and BOATS, funds, Search, Crypto Yield, and cross-ticker corporate actions while preserving the original 17 tool names, required inputs, omission behavior, and results; four optional `columns` fields are the only approved legacy descriptor additions.
 - Added four finite MCP lifecycle tools for bounded upstream IEX and consolidated-equity WebSocket subscriptions; MCP transport remains stdio.
 - Documented source-dated entitlement boundaries for IEX agreement levels, consolidated and BOATS sessions, fund fees, fundamentals, corporate actions, Search, Crypto Yield, and vendor-supplied lifecycle metadata.
 
@@ -12,6 +12,7 @@
 
 - Preserved raw and adjusted EOD OHLCV plus `divCash` and `splitFactor` in typed bulk output, with explicit history-refresh tickers for dividends and non-unit splits.
 - Added bounded WebSocket queues, cursor polling, explicit data-gap failures, finite reconnect/liveness/expiry behavior, duplicate and out-of-order flags, and cancellation-safe worker shutdown.
+- Added socket-level 8-MiB frame/message limits, linear exact-size poll admission, sanitized terminal error classifications, structural upstream-ID redaction, and dependency-trace credential isolation.
 
 ### Documentation and testing
 
