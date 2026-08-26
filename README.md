@@ -183,7 +183,7 @@ This is the Unreleased 38-tool development surface. The original 17 tool names, 
 |---|---|
 | `start_market_data_subscription` | Start one bounded IEX or consolidated-equity upstream subscription |
 | `poll_market_data_subscription` | Poll retained events by local arrival sequence with finite limits/wait; terminal sessions include a sanitized `terminalError` classification |
-| `update_market_data_subscription` | Add or remove explicit symbols on an active subscription |
+| `update_market_data_subscription` | Add or remove explicit symbols on an active subscription; a partial failure reports the current `appliedSymbols` inventory |
 | `stop_market_data_subscription` | Idempotently unsubscribe, close, cancel, and join the worker |
 
 ## EOD cache workflow

@@ -126,7 +126,11 @@ fn ignored_test_names() -> BTreeSet<String> {
             let line = line.trim();
             if line.starts_with("#[ignore") {
                 awaiting_function = true;
-            } else if awaiting_function && let Some(function) = line.strip_prefix("async fn ") {
+            } else if awaiting_function
+                && let Some(function) = line
+                    .strip_prefix("async fn ")
+                    .or_else(|| line.strip_prefix("fn "))
+            {
                 names.insert(function.split('(').next().unwrap().to_owned());
                 awaiting_function = false;
             }

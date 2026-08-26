@@ -198,6 +198,15 @@ impl ProtocolCodec {
         payload: &[u8],
         received_at: DateTime<Utc>,
     ) -> Result<ReceivedMessage, TiingoError> {
+        self.decode_with_envelope(payload, received_at)
+            .map(|(message, _)| message)
+    }
+
+    pub(crate) fn decode_with_envelope(
+        &self,
+        payload: &[u8],
+        received_at: DateTime<Utc>,
+    ) -> Result<(ReceivedMessage, Value), TiingoError> {
         if payload.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
             return Err(protocol_error("message exceeds the configured size bound"));
         }
@@ -221,15 +230,18 @@ impl ProtocolCodec {
                     "E" => RawMessageType::Error,
                     _ => unreachable!(),
                 },
-                payload: envelope,
+                payload: envelope.clone(),
             }),
             _ => return Err(protocol_error("unsupported messageType")),
         };
 
-        Ok(ReceivedMessage {
-            received_at,
-            message,
-        })
+        Ok((
+            ReceivedMessage {
+                received_at,
+                message,
+            },
+            envelope,
+        ))
     }
 
     fn decode_market(

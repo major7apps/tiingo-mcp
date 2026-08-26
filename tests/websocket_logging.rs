@@ -71,6 +71,22 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                     .stderr(Stdio::piped())
                     .spawn()
                     .expect("run isolated trace child");
+            let mut stdout = child.stdout.take().expect("capture trace child stdout");
+            let stdout_reader = std::thread::spawn(move || {
+                let mut captured = Vec::new();
+                stdout
+                    .read_to_end(&mut captured)
+                    .expect("read trace child stdout");
+                captured
+            });
+            let mut stderr = child.stderr.take().expect("capture trace child stderr");
+            let stderr_reader = std::thread::spawn(move || {
+                let mut captured = Vec::new();
+                stderr
+                    .read_to_end(&mut captured)
+                    .expect("read trace child stderr");
+                captured
+            });
             let status = match tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
                     if let Some(status) = child.try_wait().expect("poll trace child") {
@@ -85,6 +101,8 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                 Err(_) => {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
                     server.abort();
                     let _ = server.await;
                     panic!("trace child did not finish within five seconds");
@@ -98,20 +116,8 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                     panic!("mock server did not finish within five seconds");
                 }
             }
-            let mut stdout = Vec::new();
-            child
-                .stdout
-                .take()
-                .expect("capture trace child stdout")
-                .read_to_end(&mut stdout)
-                .expect("read trace child stdout");
-            let mut stderr = Vec::new();
-            child
-                .stderr
-                .take()
-                .expect("capture trace child stderr")
-                .read_to_end(&mut stderr)
-                .expect("read trace child stderr");
+            let stdout = stdout_reader.join().expect("trace stdout reader joined");
+            let stderr = stderr_reader.join().expect("trace stderr reader joined");
             (status, stdout, stderr)
         });
     let (status, mut captured, stderr) = output;

@@ -1,4 +1,8 @@
-use std::{collections::HashSet, future::Future, sync::Arc};
+use std::{
+    collections::HashSet,
+    future::Future,
+    sync::{Arc, LazyLock},
+};
 
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
@@ -27,6 +31,17 @@ use super::{
     SubscriptionStatus, TerminalErrorKind, TiingoConnector, WorkerCommand, set_status,
     set_terminal_failure,
 };
+
+static WORST_CASE_EMPTY_POLL_BYTES: LazyLock<usize> = LazyLock::new(|| {
+    serde_json::to_vec(&PollResult {
+        id: "0".repeat(32),
+        state: SubscriptionStatus::Failed,
+        terminal_error: Some(TerminalErrorKind::Authentication),
+        events: vec![],
+    })
+    .expect("a fixed empty poll response is serializable")
+    .len()
+});
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_worker(
@@ -105,6 +120,7 @@ pub(super) async fn run_worker(
             command = commands.recv() => {
                 match command {
                     Some(WorkerCommand::Update { add_symbols, remove_symbols, response }) => {
+                        let symbols_before_update = symbols.clone();
                         let update = run_with_session_control(
                             &session,
                             &mut cancel,
@@ -164,6 +180,11 @@ pub(super) async fn run_worker(
                                 false
                             }
                             Controlled::Completed(Err(error @ TiingoError::Transport { .. })) => {
+                                let error = if symbols != symbols_before_update {
+                                    error.with_applied_websocket_symbols(symbols.clone())
+                                } else {
+                                    error
+                                };
                                 let _ = response.send(Err(error));
                                 bounded_close_socket(&mut socket).await;
                                 if symbols.is_empty() {
@@ -177,12 +198,14 @@ pub(super) async fn run_worker(
                                 true
                             }
                             Controlled::Completed(Err(error)) => {
+                                let terminal_error = terminal_error_kind(&error);
+                                let error = if symbols != symbols_before_update {
+                                    error.with_applied_websocket_symbols(symbols.clone())
+                                } else {
+                                    error
+                                };
                                 if session.data.lock().await.status != SubscriptionStatus::DataGap {
-                                    set_terminal_failure(
-                                        &session,
-                                        terminal_error_kind(&error),
-                                    )
-                                    .await;
+                                    set_terminal_failure(&session, terminal_error).await;
                                 }
                                 let _ = response.send(Err(error));
                                 bounded_close_socket(&mut socket).await;
@@ -723,7 +746,7 @@ async fn queue_text_message(
     received_at: DateTime<Utc>,
     payload: &[u8],
 ) -> Result<QueueOutcome, TiingoError> {
-    let received = codec.decode(payload, received_at)?;
+    let (received, mut value) = codec.decode_with_envelope(payload, received_at)?;
     match &received.message {
         ServerMessage::Information(information) if information.response.code == 401 => {
             return Err(TiingoError::Authentication {
@@ -771,10 +794,6 @@ async fn queue_text_message(
         }
         ServerMessage::Information(_) | ServerMessage::Heartbeat(_) => false,
     };
-    let mut value: Value =
-        serde_json::from_slice(payload).map_err(|_| TiingoError::WebSocketProtocol {
-            reason: "message is not one complete JSON object",
-        })?;
     let duplicate_payload_fingerprint =
         serde_json::to_string(&value).map_err(|_| TiingoError::WebSocketProtocol {
             reason: "market event could not be encoded",
@@ -829,16 +848,7 @@ async fn queue_text_message(
             reason: "market event could not be encoded",
         })?
         .len();
-    let single_event_poll_bytes = serde_json::to_vec(&PollResult {
-        id: "0".repeat(32),
-        state: SubscriptionStatus::Failed,
-        terminal_error: Some(TerminalErrorKind::Authentication),
-        events: vec![event.clone()],
-    })
-    .map_err(|_| TiingoError::WebSocketProtocol {
-        reason: "poll response could not be encoded",
-    })?
-    .len();
+    let single_event_poll_bytes = WORST_CASE_EMPTY_POLL_BYTES.saturating_add(event_bytes);
     if single_event_poll_bytes > MAX_WEBSOCKET_POLL_BYTES
         || data.events.len() >= MAX_WEBSOCKET_QUEUE_EVENTS
         || data.queue_bytes.saturating_add(event_bytes) > MAX_WEBSOCKET_QUEUE_BYTES

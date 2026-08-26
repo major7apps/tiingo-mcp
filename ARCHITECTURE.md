@@ -61,7 +61,7 @@ Events retain vendor time and local receive time. Arrival sequence is authoritat
 
 Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication and entitlement failures do not reconnect. Terminal polls retain only the sanitized `authentication`, `entitlement`, `transport`, or `protocol` classification; upstream rejection text is discarded. Heartbeats and data refresh the 75-second liveness deadline.
 
-A session expires after 30 minutes absolute lifetime or five minutes without a registry call. Updates may add or remove symbols; changing threshold requires stop/start. Stop is idempotent and performs best-effort unsubscribe, socket close, cancellation, and join.
+A session expires after 30 minutes absolute lifetime or five minutes without a registry call. Updates may add or remove symbols; changing threshold requires stop/start. When a multi-leg update partially applies before a failure, the sanitized tool error includes `appliedSymbols` so the caller can resynchronize with the inventory used by reconnect; an empty applied inventory is terminal and never reconnects. Stop is idempotent and performs best-effort unsubscribe, socket close, cancellation, and join.
 
 ## Process ownership and I/O
 

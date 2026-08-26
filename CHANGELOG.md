@@ -11,7 +11,7 @@
 ### Data integrity and safety
 
 - Preserved raw and adjusted EOD OHLCV plus `divCash` and `splitFactor` in typed bulk output, with explicit history-refresh tickers for dividends and non-unit splits.
-- Added bounded WebSocket queues, cursor polling, explicit data-gap failures, finite reconnect/liveness/expiry behavior, duplicate and out-of-order flags, and cancellation-safe worker shutdown.
+- Added bounded WebSocket queues, cursor polling, explicit data-gap failures, finite reconnect/liveness/expiry behavior, duplicate and out-of-order flags, partial-update inventory reconciliation, and cancellation-safe worker shutdown.
 - Added socket-level 8-MiB frame/message limits, linear exact-size poll admission, sanitized terminal error classifications, structural upstream-ID redaction, and dependency-trace credential isolation.
 
 ### Documentation and testing

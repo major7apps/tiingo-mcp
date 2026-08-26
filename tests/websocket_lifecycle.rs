@@ -3633,7 +3633,9 @@ async fn acknowledged_remove_survives_add_failure_and_reconnect() {
         )
         .await
         .expect_err("unacknowledged add reports transport failure");
-    assert_eq!(error.payload().kind, "transport");
+    let error = serde_json::to_value(error.payload()).expect("serialize partial update error");
+    assert_eq!(error["kind"], "transport");
+    assert_eq!(error["appliedSymbols"], json!(["MSFT"]));
     let (delay, release) = requested_delays
         .recv()
         .await
@@ -3775,7 +3777,10 @@ async fn sole_symbol_remove_ack_with_add_failure_never_reconnects_empty() {
         )
         .await
         .expect_err("unacknowledged replacement reports transport failure");
-    assert_eq!(error.payload().kind, "transport");
+    let error =
+        serde_json::to_value(error.payload()).expect("serialize empty partial update error");
+    assert_eq!(error["kind"], "transport");
+    assert_eq!(error["appliedSymbols"], json!([]));
     tokio::task::yield_now().await;
     assert!(
         requested_delays.try_recv().is_err(),

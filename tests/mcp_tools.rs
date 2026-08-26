@@ -386,7 +386,7 @@ struct ExpectedToolSchema {
     optional: &'static [&'static str],
 }
 
-const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 32] = [
+const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     ExpectedToolSchema {
         name: "get_stock_metadata",
         properties: &["ticker"],
@@ -512,6 +512,30 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 32] = [
         properties: &["ticker", "start_date", "end_date"],
         required: &["ticker"],
         optional: &["start_date", "end_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_iex_market_snapshot",
+        properties: &[],
+        required: &[],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_forex_quotes",
+        properties: &["tickers"],
+        required: &["tickers"],
+        optional: &[],
+    },
+    ExpectedToolSchema {
+        name: "get_distributions_by_ex_date",
+        properties: &["ex_date"],
+        required: &[],
+        optional: &["ex_date"],
+    },
+    ExpectedToolSchema {
+        name: "get_splits_by_ex_date",
+        properties: &["ex_date"],
+        required: &[],
+        optional: &["ex_date"],
     },
     ExpectedToolSchema {
         name: "get_equity_realtime_snapshot",
@@ -1040,6 +1064,126 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
     assert_eq!(
         success_data("stop_market_data_subscription", &stopped_again),
         serde_json::json!({"id": subscription_id, "state": "stopped"})
+    );
+
+    websocket.await.unwrap();
+    registry.shutdown().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn partial_websocket_update_error_reports_applied_symbols_across_rmcp() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let websocket = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        let subscribe = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&subscribe).unwrap(),
+            serde_json::json!({
+                "eventName": "subscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"thresholdLevel": 6, "tickers": ["AAPL", "MSFT"]}
+            })
+        );
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-start"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let remove = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&remove).unwrap(),
+            serde_json::json!({
+                "eventName": "unsubscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"subscriptionId": "partial-start", "tickers": ["AAPL"]}
+            })
+        );
+        socket
+            .send(Message::text(
+                serde_json::json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "partial-remove"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let add = socket.next().await.unwrap().unwrap().into_text().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&add).unwrap(),
+            serde_json::json!({
+                "eventName": "subscribe",
+                "authorization": "mcp-ws-secret",
+                "eventData": {"subscriptionId": "partial-remove", "tickers": ["NVDA"]}
+            })
+        );
+        socket.send(Message::Close(None)).await.unwrap();
+    });
+    let upstream = MockServer::start().await;
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint).unwrap();
+    let registry = MarketDataRegistry::with_connector(Some("mcp-ws-secret".into()), connector);
+    let connection = Connection::with_server(TiingoServer::with_client_and_registry(
+        test_client(&upstream, "mcp-ws-secret"),
+        registry.clone(),
+    ))
+    .await;
+    let started = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
+                serde_json::json!({"service": "iex", "symbols": ["AAPL", "MSFT"]}),
+            )),
+        )
+        .await
+        .unwrap();
+    let started = success_data("start_market_data_subscription", &started);
+    let subscription_id = started["id"].as_str().unwrap();
+
+    let updated = connection
+        .client
+        .call_tool(
+            CallToolRequestParams::new("update_market_data_subscription").with_arguments(
+                arguments(serde_json::json!({
+                    "subscription_id": subscription_id,
+                    "add_symbols": ["NVDA"],
+                    "remove_symbols": ["AAPL"]
+                })),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.is_error, Some(true));
+    let text = updated.content[0]
+        .as_text()
+        .expect("partial update errors retain JSON text");
+    let payload = serde_json::from_str::<serde_json::Value>(&text.text).unwrap();
+    assert_eq!(payload["kind"], "transport");
+    assert_eq!(payload["appliedSymbols"], serde_json::json!(["MSFT"]));
+    assert_eq!(
+        updated.structured_content.as_ref().unwrap()["error"],
+        payload
+    );
+    assert!(
+        !serde_json::to_string(&updated)
+            .unwrap()
+            .contains("mcp-ws-secret")
+    );
+    assert!(
+        !serde_json::to_string(&updated)
+            .unwrap()
+            .contains("partial-remove")
     );
 
     websocket.await.unwrap();
