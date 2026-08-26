@@ -166,6 +166,14 @@ pub(super) async fn run_worker(
                             Controlled::Completed(Err(error @ TiingoError::Transport { .. })) => {
                                 let _ = response.send(Err(error));
                                 bounded_close_socket(&mut socket).await;
+                                if symbols.is_empty() {
+                                    set_terminal_failure(
+                                        &session,
+                                        TerminalErrorKind::Transport,
+                                    )
+                                    .await;
+                                    return;
+                                }
                                 true
                             }
                             Controlled::Completed(Err(error)) => {

@@ -3666,6 +3666,135 @@ async fn acknowledged_remove_survives_add_failure_and_reconnect() {
 }
 
 #[tokio::test]
+async fn sole_symbol_remove_ack_with_add_failure_never_reconnects_empty() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock WebSocket server");
+    let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept initial client");
+        let mut socket = accept_async(stream)
+            .await
+            .expect("initial WebSocket handshake");
+        socket
+            .next()
+            .await
+            .expect("initial subscribe")
+            .expect("valid initial subscribe");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "sole-initial-id"},
+                    "response": {"code": 200, "message": "subscribed"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("send initial acknowledgement");
+
+        let remove = socket
+            .next()
+            .await
+            .expect("remove command")
+            .expect("valid remove command")
+            .into_text()
+            .expect("text remove command");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&remove).expect("remove JSON"),
+            json!({
+                "eventName": "unsubscribe",
+                "authorization": "test-key",
+                "eventData": {
+                    "subscriptionId": "sole-initial-id",
+                    "tickers": ["AAPL"]
+                }
+            })
+        );
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "sole-remove-id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("acknowledge sole-symbol remove");
+
+        let add = socket
+            .next()
+            .await
+            .expect("add command")
+            .expect("valid add command")
+            .into_text()
+            .expect("text add command");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&add).expect("add JSON"),
+            json!({
+                "eventName": "subscribe",
+                "authorization": "test-key",
+                "eventData": {"subscriptionId": "sole-remove-id", "tickers": ["MSFT"]}
+            })
+        );
+        socket
+            .send(Message::Close(None))
+            .await
+            .expect("disconnect before replacement add acknowledgement");
+    });
+    let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+        .expect("mock endpoint is valid");
+    let (delay_requests, mut requested_delays) = tokio::sync::mpsc::unbounded_channel();
+    let registry = MarketDataRegistry::with_connector_and_clocks(
+        Some("test-key".into()),
+        connector,
+        Arc::new(FixedClock(Utc::now())),
+        Arc::new(ManualReconnectClock {
+            requests: delay_requests,
+        }),
+    );
+    let started = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await
+        .expect("subscription starts");
+
+    let error = registry
+        .update(
+            &started.id,
+            UpdateRequest {
+                add_symbols: vec!["MSFT".into()],
+                remove_symbols: vec!["AAPL".into()],
+                threshold_level: None,
+            },
+        )
+        .await
+        .expect_err("unacknowledged replacement reports transport failure");
+    assert_eq!(error.payload().kind, "transport");
+    tokio::task::yield_now().await;
+    assert!(
+        requested_delays.try_recv().is_err(),
+        "an empty acknowledged inventory must not enter reconnect backoff"
+    );
+
+    let terminal = tokio::time::timeout(Duration::from_secs(1), registry.poll(&started.id, 0))
+        .await
+        .expect("empty partial state becomes terminal promptly")
+        .expect("terminal state remains inspectable");
+    assert_eq!(terminal.state, SubscriptionStatus::Failed);
+    assert_eq!(terminal.terminal_error, Some(TerminalErrorKind::Transport));
+    assert!(terminal.events.is_empty());
+
+    registry.shutdown().await;
+    server.await.expect("mock server exits cleanly");
+}
+
+#[tokio::test]
 async fn update_acknowledgement_is_bounded_to_five_seconds_and_closes_uncertain_state() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

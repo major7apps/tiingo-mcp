@@ -1,4 +1,8 @@
-use std::{process::Command, time::Duration};
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+    time::Duration,
+};
 
 use futures_util::{SinkExt, StreamExt};
 use tiingo_mcp::websocket::{
@@ -53,7 +57,7 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                     .expect("receive unsubscribe frame")
                     .expect("valid unsubscribe frame");
             });
-            let output = tokio::task::spawn_blocking(move || {
+            let mut child =
                 Command::new(std::env::current_exe().expect("locate integration-test process"))
                     .args([
                         "--exact",
@@ -63,11 +67,29 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                     .env(CHILD_ENV, "1")
                     .env(ENDPOINT_ENV, endpoint)
                     .env("RUST_LOG", "tungstenite=trace")
-                    .output()
-                    .expect("run isolated trace child")
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("run isolated trace child");
+            let status = match tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(status) = child.try_wait().expect("poll trace child") {
+                        break status;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
             })
             .await
-            .expect("trace child task joined");
+            {
+                Ok(status) => status,
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    server.abort();
+                    let _ = server.await;
+                    panic!("trace child did not finish within five seconds");
+                }
+            };
             match tokio::time::timeout(Duration::from_secs(5), &mut server).await {
                 Ok(joined) => joined.expect("mock server joined"),
                 Err(_) => {
@@ -76,11 +98,24 @@ fn tungstenite_trace_never_emits_credentials_or_upstream_ids() {
                     panic!("mock server did not finish within five seconds");
                 }
             }
-            output
+            let mut stdout = Vec::new();
+            child
+                .stdout
+                .take()
+                .expect("capture trace child stdout")
+                .read_to_end(&mut stdout)
+                .expect("read trace child stdout");
+            let mut stderr = Vec::new();
+            child
+                .stderr
+                .take()
+                .expect("capture trace child stderr")
+                .read_to_end(&mut stderr)
+                .expect("read trace child stderr");
+            (status, stdout, stderr)
         });
-    let status = output.status;
-    let mut captured = output.stdout;
-    captured.extend(output.stderr);
+    let (status, mut captured, stderr) = output;
+    captured.extend(stderr);
     let captured = String::from_utf8_lossy(&captured);
     assert!(!captured.contains(API_KEY), "API key escaped trace output");
     assert!(
