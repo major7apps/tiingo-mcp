@@ -135,12 +135,12 @@ impl ResponseShape {
                 })
             }),
             Self::IntradayBar => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        non_empty_string(object, "date")
-                            && has_number(object, &["open", "high", "low", "close"])
+                !rows.is_empty()
+                    && rows.iter().all(|row| {
+                        row.as_object().is_some_and(|object| {
+                            non_empty_string(object, "date") && valid_ohlcv_bar(object)
+                        })
                     })
-                })
             }),
         }
     }
@@ -198,6 +198,26 @@ fn has_number(object: &serde_json::Map<String, Value>, fields: &[&str]) -> bool 
     fields
         .iter()
         .any(|field| object.get(*field).is_some_and(Value::is_number))
+}
+
+fn valid_ohlcv_bar(object: &serde_json::Map<String, Value>) -> bool {
+    let Some(open) = object.get("open").and_then(Value::as_f64) else {
+        return false;
+    };
+    let Some(high) = object.get("high").and_then(Value::as_f64) else {
+        return false;
+    };
+    let Some(low) = object.get("low").and_then(Value::as_f64) else {
+        return false;
+    };
+    let Some(close) = object.get("close").and_then(Value::as_f64) else {
+        return false;
+    };
+    let Some(volume) = object.get("volume").and_then(Value::as_f64) else {
+        return false;
+    };
+
+    high >= open && high >= close && high >= low && low <= open && low <= close && volume >= 0.0
 }
 
 fn nested_rows_have_number(
@@ -816,10 +836,23 @@ fn family_specific_live_shapes_require_identity_and_stable_fields() {
     let intraday_bar = ResponseShape::IntradayBar;
     assert!(intraday_bar.matches(&serde_json::json!([{
         "date": "2026-08-25T14:00:00Z",
+        "open": 226.0,
+        "high": 228.0,
+        "low": 225.5,
+        "close": 227.16
+        ,"volume": 42000
+    }])));
+    assert!(!intraday_bar.matches(&serde_json::json!([{
+        "date": "2026-08-25T14:00:00Z",
         "close": 227.16
     }])));
     assert!(!intraday_bar.matches(&serde_json::json!([{
-        "date": "2026-08-25T14:00:00Z"
+        "date": "2026-08-25T14:00:00Z",
+        "open": 226.0,
+        "high": 225.0,
+        "low": 225.5,
+        "close": 227.16,
+        "volume": 42000
     }])));
 }
 
