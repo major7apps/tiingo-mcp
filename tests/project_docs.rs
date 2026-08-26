@@ -488,4 +488,27 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
         fs::read_link(root.join("CLAUDE.md")).unwrap(),
         Path::new("AGENTS.md")
     );
+
+    assert!(
+        agents.contains("four approved optional `columns` additions"),
+        "AGENTS.md must state the exact backward-compatible legacy-tool delta"
+    );
+    let api_surface = read_root_file("API_SURFACE.md");
+    assert!(
+        api_surface.contains("four approved optional `columns` additions"),
+        "API_SURFACE.md must state the exact backward-compatible legacy-tool delta"
+    );
+
+    let architecture = read_root_file("ARCHITECTURE.md");
+    assert!(
+        architecture.contains("This server exposes MCP over stdio only."),
+        "ARCHITECTURE.md must scope the transport statement to this server"
+    );
+    assert!(!architecture.contains("MCP uses stdio only."));
+
+    let stocks_guide = read_root_file("src/mcp/data/guides/stocks.json");
+    assert!(
+        !stocks_guide.contains("after_hours=True"),
+        "embedded JSON guidance must use JSON boolean spelling"
+    );
 }

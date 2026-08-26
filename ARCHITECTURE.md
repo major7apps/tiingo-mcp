@@ -1,6 +1,6 @@
 # Architecture
 
-`tiingo-mcp` is a native Rust server built on the official [RMCP SDK](https://github.com/modelcontextprotocol/rust-sdk). MCP uses stdio only. Tiingo REST and WebSocket connections are upstream data transports; they do not add an MCP WebSocket or Streamable HTTP transport.
+`tiingo-mcp` is a native Rust server built on the official [RMCP SDK](https://github.com/modelcontextprotocol/rust-sdk). This server exposes MCP over stdio only. Tiingo REST and WebSocket connections are upstream data transports; they do not add an MCP WebSocket or Streamable HTTP transport.
 
 ## Dependency map
 

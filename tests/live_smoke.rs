@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::NaiveDate;
+use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
 use serde_json::Value;
 use tiingo_mcp::{
     client::{
@@ -27,12 +27,25 @@ enum LiveOutcome {
 enum ResponseShape {
     NonEmptyObject,
     NonEmptyObjectArray,
-    ForexQuote { ticker: &'static str },
-    CryptoQuote { ticker: &'static str },
+    ForexQuote {
+        ticker: &'static str,
+    },
+    CryptoQuote {
+        ticker: &'static str,
+    },
     NewsArticle,
     FundamentalsDefinition,
-    Dividend { ticker: &'static str },
-    Split { ticker: &'static str },
+    Dividend {
+        ticker: &'static str,
+    },
+    Split {
+        ticker: &'static str,
+    },
+    EquitySnapshot {
+        ticker: &'static str,
+        price_fields: &'static [&'static str],
+    },
+    IntradayBar,
 }
 
 impl ResponseShape {
@@ -107,6 +120,25 @@ impl ResponseShape {
                         string_field_is(object, "ticker", ticker)
                             && non_empty_string(object, "exDate")
                             && has_number(object, &["splitFactor"])
+                    })
+                })
+            }),
+            Self::EquitySnapshot {
+                ticker,
+                price_fields,
+            } => value.as_array().is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.as_object().is_some_and(|object| {
+                        string_field_is(object, "ticker", ticker)
+                            && has_number(object, price_fields)
+                    })
+                })
+            }),
+            Self::IntradayBar => value.as_array().is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.as_object().is_some_and(|object| {
+                        non_empty_string(object, "date")
+                            && has_number(object, &["open", "high", "low", "close"])
                     })
                 })
             }),
@@ -245,6 +277,14 @@ fn corporate_action_range() -> DateRange {
     DateRange {
         start_date: Some(date(2023, 1, 1)),
         end_date: Some(date(2024, 12, 31)),
+    }
+}
+
+fn recent_intraday_range() -> DateRange {
+    let end_date = Utc::now().date_naive();
+    DateRange {
+        start_date: Some(end_date - ChronoDuration::days(7)),
+        end_date: Some(end_date),
     }
 }
 
@@ -392,22 +432,37 @@ async fn live_consolidated_equity_single_ticker() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
-    classify(
+    if classify(
         "consolidated equity snapshot",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::EquitySnapshot {
+            ticker: "AAPL",
+            price_fields: &["tngoLast", "lqRefPrice", "prevClose", "open", "high", "low"],
+        },
         client.get_equity_realtime_snapshot(Some("AAPL")),
     )
-    .await?;
+    .await?
+        == LiveOutcome::Entitlement
+    {
+        return Ok(());
+    }
+    let columns = [
+        "date".to_owned(),
+        "open".to_owned(),
+        "high".to_owned(),
+        "low".to_owned(),
+        "close".to_owned(),
+        "volume".to_owned(),
+    ];
     classify(
         "consolidated equity intraday prices",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::IntradayBar,
         client.get_equity_intraday_prices(
             "AAPL",
-            DateRange::default(),
+            recent_intraday_range(),
             Some(IntradayResample::OneHour),
             None,
             None,
-            None,
+            Some(&columns),
         ),
     )
     .await?;
@@ -421,21 +476,43 @@ async fn live_boats_single_ticker() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
-    classify(
+    if classify(
         "BOATS snapshot",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::EquitySnapshot {
+            ticker: "AAPL",
+            price_fields: &[
+                "last",
+                "tngoLast",
+                "mid",
+                "bidPrice",
+                "askPrice",
+                "prevClose",
+            ],
+        },
         client.get_boats_snapshot(Some("AAPL")),
     )
-    .await?;
+    .await?
+        == LiveOutcome::Entitlement
+    {
+        return Ok(());
+    }
+    let columns = [
+        "date".to_owned(),
+        "open".to_owned(),
+        "high".to_owned(),
+        "low".to_owned(),
+        "close".to_owned(),
+        "volume".to_owned(),
+    ];
     classify(
         "BOATS prices",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::IntradayBar,
         client.get_boats_prices(
             "AAPL",
-            DateRange::default(),
+            recent_intraday_range(),
             Some(IntradayResample::OneHour),
             None,
-            None,
+            Some(&columns),
         ),
     )
     .await?;
@@ -718,6 +795,42 @@ fn family_specific_live_shapes_require_identity_and_stable_fields() {
         "ticker": "AAPL",
         "exDate": "2024-11-08"
     }])));
+
+    let equity_snapshot = ResponseShape::EquitySnapshot {
+        ticker: "AAPL",
+        price_fields: &["tngoLast", "prevClose"],
+    };
+    assert!(equity_snapshot.matches(&serde_json::json!([{
+        "ticker": "AAPL",
+        "tngoLast": 227.16
+    }])));
+    assert!(!equity_snapshot.matches(&serde_json::json!([{
+        "ticker": "MSFT",
+        "tngoLast": 227.16
+    }])));
+    assert!(!equity_snapshot.matches(&serde_json::json!([{
+        "ticker": "AAPL",
+        "timestamp": "2026-08-25T14:30:00Z"
+    }])));
+
+    let intraday_bar = ResponseShape::IntradayBar;
+    assert!(intraday_bar.matches(&serde_json::json!([{
+        "date": "2026-08-25T14:00:00Z",
+        "close": 227.16
+    }])));
+    assert!(!intraday_bar.matches(&serde_json::json!([{
+        "date": "2026-08-25T14:00:00Z"
+    }])));
+}
+
+#[test]
+fn live_intraday_history_range_is_explicit_recent_and_bounded() {
+    let range = recent_intraday_range();
+    let start = range.start_date.expect("live range must have a start date");
+    let end = range.end_date.expect("live range must have an end date");
+
+    assert_eq!(end - start, ChronoDuration::days(7));
+    assert!(end <= Utc::now().date_naive());
 }
 
 #[test]

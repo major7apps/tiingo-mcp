@@ -1,6 +1,6 @@
 # API surface
 
-This is the maintained tool-to-upstream contract for the current 38-tool server. The original 17 descriptors remain frozen by `tests/contract/baseline/v1-mcp.json`; every other row is additive.
+This is the maintained tool-to-upstream contract for the current 38-tool server. The original 17 tool names, required inputs, omission behavior, and results remain compatible with `tests/contract/baseline/v1-mcp.json`; four approved optional `columns` additions are the only legacy descriptor deltas, and every other row is additive.
 
 Status means:
 
@@ -60,8 +60,8 @@ This inventory records the live harness that is actually checked in. It is inten
 
 | Ignored test | Tools exercised | Bound |
 |---|---|---|
-| `live_boats_single_ticker` | `get_boats_snapshot`, `get_boats_prices` | One ticker; entitlement-classifying |
-| `live_consolidated_equity_single_ticker` | `get_equity_realtime_snapshot`, `get_equity_intraday_prices` | One ticker; documented session |
+| `live_boats_single_ticker` | `get_boats_snapshot`, `get_boats_prices` | One ticker; recent seven-day OHLCV history; entitlement-classifying |
+| `live_consolidated_equity_single_ticker` | `get_equity_realtime_snapshot`, `get_equity_intraday_prices` | One ticker; recent seven-day OHLCV history; documented session |
 | `live_consolidated_level_six_single_ticker_websocket` | `start_market_data_subscription`, `poll_market_data_subscription`, `stop_market_data_subscription` | Three level-6 one-ticker lifecycles; finite poll/cleanup |
 | `live_crypto_yield_metrics_single_pool` | `get_crypto_yield_metrics` | One pool/date range; three samples or early 403 |
 | `live_distributions_by_ex_date_tiny_filter` | `get_distributions_by_ex_date` | One exact ex-date; three samples or early 403 |

@@ -15,7 +15,7 @@
   "common_pitfalls": [
     "Ticker symbols are case-sensitive in the URL -- always uppercase.",
     "Intraday data is limited to recent history; check metadata for available date range.",
-    "get_realtime_price may return stale data outside market hours unless after_hours=True.",
+    "get_realtime_price may return stale data outside market hours unless after_hours=true.",
     "The vendor-supplied /tiingo/daily/meta route is availability-dependent and requires an explicit columns list.",
     "Consolidated 4am-8pm ET and BOATS 8pm-3:59am ET are separate beta products, not one 24x5 endpoint."
   ],
