@@ -899,7 +899,148 @@ fn map_connect_error(error: WebSocketError) -> TiingoError {
 
 #[cfg(test)]
 mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+    use crate::config::WEBSOCKET_ABSOLUTE_LIFETIME;
+
     use super::*;
+
+    #[tokio::test]
+    async fn partial_update_reports_applied_symbols_at_absolute_expiry() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock WebSocket server");
+        let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
+        let (add_seen, add_received) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept client");
+            let mut socket = accept_async(stream).await.expect("WebSocket handshake");
+            socket
+                .next()
+                .await
+                .expect("subscribe command")
+                .expect("valid subscribe command");
+            socket
+                .send(Message::text(
+                    json!({
+                        "messageType": "I",
+                        "data": {"subscriptionId": "expiry-initial-id"},
+                        "response": {"code": 200, "message": "subscribed"}
+                    })
+                    .to_string(),
+                ))
+                .await
+                .expect("send acknowledgement");
+
+            let remove = socket
+                .next()
+                .await
+                .expect("remove command")
+                .expect("valid remove command")
+                .into_text()
+                .expect("text remove command");
+            assert_eq!(
+                serde_json::from_str::<Value>(&remove).expect("remove JSON"),
+                json!({
+                    "eventName": "unsubscribe",
+                    "authorization": "test-key",
+                    "eventData": {
+                        "subscriptionId": "expiry-initial-id",
+                        "tickers": ["AAPL"]
+                    }
+                })
+            );
+            socket
+                .send(Message::text(
+                    json!({
+                        "messageType": "I",
+                        "data": {"subscriptionId": "expiry-remove-id"},
+                        "response": {"code": 200, "message": "updated"}
+                    })
+                    .to_string(),
+                ))
+                .await
+                .expect("acknowledge remove");
+            let add = socket
+                .next()
+                .await
+                .expect("add command")
+                .expect("valid add command")
+                .into_text()
+                .expect("text add command");
+            assert_eq!(
+                serde_json::from_str::<Value>(&add).expect("add JSON"),
+                json!({
+                    "eventName": "subscribe",
+                    "authorization": "test-key",
+                    "eventData": {
+                        "subscriptionId": "expiry-remove-id",
+                        "tickers": ["NVDA"]
+                    }
+                })
+            );
+            add_seen.send(()).expect("record pending add");
+            while let Some(message) = socket.next().await {
+                if matches!(message, Ok(Message::Close(_)) | Err(_)) {
+                    break;
+                }
+            }
+        });
+        let connector = TiingoConnector::with_endpoints(endpoint.clone(), endpoint)
+            .expect("mock endpoint is valid");
+        let registry = MarketDataRegistry::with_connector(Some("test-key".into()), connector);
+        let started = registry
+            .start(StartRequest {
+                service: Service::Iex,
+                symbols: vec!["AAPL".into(), "MSFT".into()],
+                threshold_level: None,
+                confirm_iex_market_data_agreement: false,
+            })
+            .await
+            .expect("subscription starts");
+        let session = registry
+            .session(&started.id)
+            .await
+            .expect("started session is registered");
+        session.data.lock().await.started_at =
+            Instant::now() - WEBSOCKET_ABSOLUTE_LIFETIME + std::time::Duration::from_secs(4);
+
+        let update_registry = registry.clone();
+        let update_id = started.id.clone();
+        let update = tokio::spawn(async move {
+            update_registry
+                .update(
+                    &update_id,
+                    UpdateRequest {
+                        add_symbols: vec!["NVDA".into()],
+                        remove_symbols: vec!["AAPL".into()],
+                        threshold_level: None,
+                    },
+                )
+                .await
+        });
+        add_received.await.expect("server sees pending add");
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(4)).await;
+        let error = update
+            .await
+            .expect("update task joins")
+            .expect_err("absolute expiry interrupts the pending add");
+        let error = serde_json::to_value(error.payload()).expect("serialize expiry update error");
+        assert_eq!(error["kind"], "timeout");
+        assert_eq!(error["appliedSymbols"], json!(["MSFT"]));
+        tokio::time::resume();
+        server.await.expect("mock server exits cleanly");
+        assert_eq!(
+            session.data.lock().await.status,
+            SubscriptionStatus::Expired
+        );
+
+        registry.shutdown().await;
+    }
 
     #[tokio::test]
     async fn poll_snapshot_serializes_whole_wrapper_once_for_maximum_page() {
