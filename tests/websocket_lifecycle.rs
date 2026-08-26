@@ -1548,7 +1548,8 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
         .await
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
-    let (activity, mut activities) = tokio::sync::mpsc::unbounded_channel();
+    let (activity, mut activities) =
+        tokio::sync::mpsc::unbounded_channel::<(u8, tokio::sync::oneshot::Sender<()>)>();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept client");
         let mut socket = accept_async(stream).await.expect("WebSocket handshake");
@@ -1571,12 +1572,28 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
         loop {
             tokio::select! {
                 activity = activities.recv() => {
-                    let Some(index) = activity else { return };
+                    let Some((index, processed)) = activity else { return };
                     socket.send(Message::text(json!({
                         "messageType": "A",
                         "service": "iex",
                         "data": ["2026-08-25T14:00:00Z", "AAPL", index as f64]
                     }).to_string())).await.expect("send market event");
+                    let ping_payload = vec![index];
+                    socket
+                        .send(Message::Ping(ping_payload.clone().into()))
+                        .await
+                        .expect("send market event processing barrier");
+                    loop {
+                        match socket.next().await {
+                            Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => {
+                                break;
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(error)) => panic!("receive market event barrier: {error}"),
+                            None => panic!("market event barrier socket remains open"),
+                        }
+                    }
+                    processed.send(()).expect("record processed market event");
                 }
                 incoming = socket.next() => match incoming {
                     Some(Ok(Message::Close(_))) | None => return,
@@ -1602,15 +1619,20 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
     let mut after_sequence = 0;
     for index in 1..=29 {
         tokio::time::advance(Duration::from_secs(60)).await;
-        activity.send(index).expect("request minute market event");
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
+        tokio::time::resume();
+        let (processed, processing_complete) = tokio::sync::oneshot::channel();
+        activity
+            .send((index, processed))
+            .expect("request minute market event");
+        processing_complete
+            .await
+            .expect("worker processes minute market event");
         let poll = registry
             .poll(&started.id, after_sequence)
             .await
             .expect("minute poll succeeds");
         after_sequence = poll.events.last().expect("minute event").sequence;
+        tokio::time::pause();
     }
     assert!(
         !server.is_finished(),
@@ -1618,11 +1640,11 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
     );
     tokio::time::advance(Duration::from_secs(60)).await;
     tokio::time::advance(Duration::from_millis(1)).await;
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
-    assert!(server.is_finished(), "absolute expiry closes the socket");
-    server.await.expect("mock server exits cleanly");
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("absolute expiry closes the socket promptly")
+        .expect("mock server exits cleanly");
     let expired = registry
         .poll(&started.id, after_sequence)
         .await
@@ -1638,7 +1660,11 @@ async fn liveness_fails_after_seventy_five_seconds_and_heartbeat_and_data_refres
         .await
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
-    let (refresh, mut refreshes) = tokio::sync::mpsc::unbounded_channel();
+    let (refresh, mut refreshes) = tokio::sync::mpsc::unbounded_channel::<(
+        &'static str,
+        u8,
+        tokio::sync::oneshot::Sender<()>,
+    )>();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept client");
         let mut socket = accept_async(stream).await.expect("WebSocket handshake");
@@ -1660,21 +1686,44 @@ async fn liveness_fails_after_seventy_five_seconds_and_heartbeat_and_data_refres
             .expect("send acknowledgement");
         loop {
             tokio::select! {
-                refresh = refreshes.recv() => match refresh {
-                    Some("heartbeat") => socket.send(Message::text(json!({
-                        "messageType": "H",
-                        "response": {"code": 200, "message": "heartbeat"}
-                    }).to_string())).await.expect("send heartbeat"),
-                    Some("data") => socket.send(Message::text(json!({
-                        "messageType": "A",
-                        "service": "iex",
-                        "data": ["2026-08-25T14:00:00Z", "AAPL", 100.0]
-                    }).to_string())).await.expect("send market data"),
-                    Some("raw") => socket.send(Message::text(json!({
-                        "messageType": "U",
-                        "data": {"ticker": "AAPL", "value": 101.0}
-                    }).to_string())).await.expect("send raw market update"),
-                    _ => {}
+                refresh = refreshes.recv() => {
+                    let Some((kind, cycle, processed)) = refresh else { return };
+                    let message = match kind {
+                        "heartbeat" => json!({
+                            "messageType": "H",
+                            "response": {"code": 200, "message": "heartbeat"}
+                        }),
+                        "data" => json!({
+                            "messageType": "A",
+                            "service": "iex",
+                            "data": ["2026-08-25T14:00:00Z", "AAPL", 100.0]
+                        }),
+                        "raw" => json!({
+                            "messageType": "U",
+                            "data": {"ticker": "AAPL", "value": 101.0}
+                        }),
+                        _ => panic!("unknown liveness refresh kind"),
+                    };
+                    socket
+                        .send(Message::text(message.to_string()))
+                        .await
+                        .expect("send liveness refresh");
+                    let ping_payload = vec![cycle];
+                    socket
+                        .send(Message::Ping(ping_payload.clone().into()))
+                        .await
+                        .expect("send liveness processing barrier");
+                    loop {
+                        match socket.next().await {
+                            Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => {
+                                break;
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(error)) => panic!("receive liveness barrier: {error}"),
+                            None => panic!("liveness barrier socket remains open"),
+                        }
+                    }
+                    processed.send(()).expect("record processed liveness refresh");
                 },
                 incoming = socket.next() => match incoming {
                     Some(Ok(Message::Close(_))) | None => return,
@@ -1699,27 +1748,41 @@ async fn liveness_fails_after_seventy_five_seconds_and_heartbeat_and_data_refres
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(74)).await;
     assert!(!server.is_finished());
-    refresh.send("heartbeat").expect("request heartbeat");
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::resume();
+    let (processed, processing_complete) = tokio::sync::oneshot::channel();
+    refresh
+        .send(("heartbeat", 1, processed))
+        .expect("request heartbeat");
+    processing_complete
+        .await
+        .expect("worker processes heartbeat");
+    tokio::time::pause();
     tokio::time::advance(Duration::from_secs(74)).await;
     assert!(!server.is_finished());
-    refresh.send("data").expect("request market data");
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::resume();
+    let (processed, processing_complete) = tokio::sync::oneshot::channel();
+    refresh
+        .send(("data", 2, processed))
+        .expect("request market data");
+    processing_complete
+        .await
+        .expect("worker processes market data");
     let data_poll = registry
         .poll(&started.id, 0)
         .await
         .expect("market data is processed");
     assert_eq!(data_poll.events.len(), 1);
+    tokio::time::pause();
     tokio::time::advance(Duration::from_secs(74)).await;
     assert!(!server.is_finished());
-    refresh.send("raw").expect("request raw market update");
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::resume();
+    let (processed, processing_complete) = tokio::sync::oneshot::channel();
+    refresh
+        .send(("raw", 3, processed))
+        .expect("request raw market update");
+    processing_complete
+        .await
+        .expect("worker processes raw market update");
     let raw_poll = registry
         .poll(
             &started.id,
@@ -1728,23 +1791,18 @@ async fn liveness_fails_after_seventy_five_seconds_and_heartbeat_and_data_refres
         .await
         .expect("raw update is processed");
     assert_eq!(raw_poll.events.len(), 1);
+    tokio::time::pause();
     tokio::time::advance(Duration::from_secs(74)).await;
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
     assert!(!server.is_finished());
     tokio::time::advance(Duration::from_secs(1)).await;
     tokio::time::advance(Duration::from_millis(1)).await;
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
-    assert!(
-        server.is_finished(),
-        "75 seconds without data or heartbeat closes the socket"
-    );
-    server.await.expect("mock server exits cleanly");
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("75 seconds without data or heartbeat closes the socket")
+        .expect("mock server exits cleanly");
     let failed = registry
-        .poll(&started.id, u64::MAX)
+        .poll_with_bounds(&started.id, u64::MAX, 1, Duration::ZERO)
         .await
         .expect("liveness failure remains inspectable");
     assert_eq!(failed.state, SubscriptionStatus::Reconnecting);
@@ -2597,6 +2655,7 @@ async fn poll_wait_is_bounded_to_five_seconds_and_cancellation_keeps_session_ali
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
     let (send_data, receive_data) = tokio::sync::oneshot::channel();
+    let (data_processed, await_data_processed) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept client");
         let mut socket = accept_async(stream).await.expect("WebSocket handshake");
@@ -2628,6 +2687,22 @@ async fn poll_wait_is_bounded_to_five_seconds_and_cancellation_keeps_session_ali
             ))
             .await
             .expect("send market event");
+        let ping_payload = vec![49];
+        socket
+            .send(Message::Ping(ping_payload.clone().into()))
+            .await
+            .expect("send market event processing barrier");
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => break,
+                Some(Ok(_)) => {}
+                Some(Err(error)) => panic!("receive market event barrier: {error}"),
+                None => panic!("market event barrier socket remains open"),
+            }
+        }
+        data_processed
+            .send(())
+            .expect("record processed market event");
         while let Some(message) = socket.next().await {
             if matches!(message, Ok(Message::Close(_))) {
                 break;
@@ -2670,10 +2745,11 @@ async fn poll_wait_is_bounded_to_five_seconds_and_cancellation_keeps_session_ali
     tokio::task::yield_now().await;
     cancelled.abort();
     let _ = cancelled.await;
+    tokio::time::resume();
     send_data.send(()).expect("request market event");
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    await_data_processed
+        .await
+        .expect("worker processes market event");
     let live = registry
         .poll(&started.id, 0)
         .await
