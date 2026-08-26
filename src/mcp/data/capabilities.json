@@ -1,6 +1,25 @@
 {
-  "as_of": "2026-08-24",
+  "access": {
+    "authentication": "HTTP 401 means Tiingo rejected the credential.",
+    "authorization": "HTTP 403 or an upstream WebSocket authorization rejection means the credential is not entitled to the requested capability.",
+    "bulk_usage": "Every live call consumes quota or bandwidth; bulk and all-market operations are not routine live smoke tests.",
+    "crypto_yield": "Plan and entitlement dependent.",
+    "fund_fees": "Enterprise or institutional access.",
+    "fundamentals_and_corporate_actions": "Entitlement dependent.",
+    "search": "Early beta; response fields can change.",
+    "ticker_lifecycle_metadata": "Vendor-supplied and availability dependent."
+  },
+  "as_of": "2026-08-25",
   "asset_classes": {
+    "corporate_actions": {
+      "data_types": [
+        "dividends",
+        "distribution_yield",
+        "splits",
+        "batch_ex_date"
+      ],
+      "description": "Per-ticker and cross-ticker distributions and splits"
+    },
     "crypto": {
       "data_types": [
         "realtime_quote",
@@ -9,28 +28,98 @@
       ],
       "description": "Cryptocurrencies across exchanges"
     },
+    "crypto_yield": {
+      "data_types": [
+        "platforms",
+        "pools",
+        "latest_ticks",
+        "historical_metrics"
+      ],
+      "description": "Crypto lending platform and pool metrics"
+    },
     "forex": {
       "data_types": [
         "realtime_quote",
+        "batch_realtime_quotes",
         "historical_prices"
       ],
       "description": "Foreign exchange currency pairs"
     },
+    "funds": {
+      "data_types": [
+        "metadata",
+        "fee_metrics"
+      ],
+      "description": "Mutual-fund and ETF fee data"
+    },
+    "news": {
+      "data_types": [
+        "article_search"
+      ],
+      "description": "Filterable financial news articles"
+    },
     "stocks": {
       "data_types": [
         "eod_prices",
-        "intraday_prices",
-        "realtime_quote",
-        "metadata"
+        "bulk_eod_refresh",
+        "lifecycle_metadata",
+        "iex_realtime",
+        "iex_intraday",
+        "consolidated_realtime",
+        "boats_overnight",
+        "fundamentals"
       ],
-      "description": "US and international equities"
+      "description": "Equity EOD, intraday, realtime, lifecycle, and company data"
     }
   },
   "entitlements_change_over_time": true,
   "official_sources": [
     "https://www.tiingo.com/documentation/general/overview",
-    "https://api.tiingo.com/documentation/end-of-day"
+    "https://www.tiingo.com/documentation/end-of-day",
+    "https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/",
+    "https://www.tiingo.com/documentation/iex",
+    "https://www.tiingo.com/documentation/equity-realtime-stock-data",
+    "https://www.tiingo.com/documentation/boats",
+    "https://www.tiingo.com/documentation/forex",
+    "https://www.tiingo.com/documentation/crypto",
+    "https://www.tiingo.com/documentation/crypto-yield",
+    "https://www.tiingo.com/documentation/news",
+    "https://www.tiingo.com/documentation/fundamentals",
+    "https://www.tiingo.com/documentation/mutual-fund-and-etf-fees",
+    "https://www.tiingo.com/documentation/corporate-actions/dividends",
+    "https://www.tiingo.com/documentation/corporate-actions/splits",
+    "https://www.tiingo.com/documentation/utilities/search",
+    "https://www.tiingo.com/documentation/websockets/iex",
+    "https://www.tiingo.com/documentation/websockets/equity-realtime-stock-data"
   ],
   "server_name": "Tiingo MCP Server",
-  "tool_count": 17
+  "tool_count": 38,
+  "upstream_market_data": {
+    "description": "Finite start, poll, update, and stop lifecycle over upstream Tiingo WebSockets; MCP transport remains stdio.",
+    "services": {
+      "consolidated": {
+        "hours": "4am-8pm ET",
+        "status": "beta",
+        "threshold_levels": [
+          4,
+          6
+        ]
+      },
+      "iex": {
+        "agreement_confirmation_levels": [
+          0,
+          5
+        ],
+        "default_threshold_level": 6
+      }
+    }
+  },
+  "utilities": {
+    "search": {
+      "data_types": [
+        "asset_search"
+      ],
+      "status": "early beta"
+    }
+  }
 }

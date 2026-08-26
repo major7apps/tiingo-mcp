@@ -1,0 +1,25 @@
+{
+  "asset_class": "search",
+  "availability": {
+    "as_of": "2026-08-25",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/general/overview",
+      "https://www.tiingo.com/documentation/utilities/search"
+    ],
+    "statement": "Search is an early-beta capability; response fields and availability can change."
+  },
+  "common_pitfalls": [
+    "Search finds Tiingo assets by ticker or name; it does not search news articles.",
+    "Queries must be nonblank and no longer than 256 characters.",
+    "Treat beta response fields as vendor-owned rather than a frozen schema."
+  ],
+  "description": "Early-beta Tiingo asset search by ticker or name.",
+  "ticker_format": "Nonblank ticker or asset-name query text",
+  "tools": [
+    "search_tiingo_assets"
+  ],
+  "workflows": [
+    "Search with the narrowest useful ticker/name text.",
+    "Use the returned identifier with the matching asset-family metadata tool."
+  ]
+}

@@ -73,7 +73,7 @@ jobs:
 
       - name: Audit dependencies, licenses, and sources
         if: matrix.rust == 'stable'
-        run: cargo deny check
+        run: cargo deny check all
 
   native-artifact:
     name: Native artifact (${{ matrix.target }})

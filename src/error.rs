@@ -24,8 +24,16 @@ pub enum TiingoError {
     Timeout { capability: &'static str },
     #[error("Tiingo transport failed while requesting {capability}")]
     Transport { capability: &'static str },
+    #[error("Tiingo WebSocket update partially applied before failure: {source}")]
+    PartialWebSocketUpdate {
+        #[source]
+        source: Box<TiingoError>,
+        applied_symbols: Vec<String>,
+    },
     #[error("Tiingo returned invalid JSON for {capability}")]
     Decode { capability: &'static str },
+    #[error("Tiingo WebSocket protocol error: {reason}")]
+    WebSocketProtocol { reason: &'static str },
     #[error("Tiingo response for {capability} exceeded {limit} bytes")]
     ResponseTooLarge {
         capability: &'static str,
@@ -45,6 +53,8 @@ pub struct ErrorPayload<'a> {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_code: Option<u16>,
+    #[serde(rename = "appliedSymbols", skip_serializing_if = "Option::is_none")]
+    pub applied_symbols: Option<Vec<String>>,
 }
 
 impl TiingoError {
@@ -75,11 +85,13 @@ impl TiingoError {
                     "Tiingo is not configured. Set TIINGO_API_KEY before calling Tiingo tools."
                         .into(),
                 status_code: None,
+                applied_symbols: None,
             },
             Self::Validation(detail) => ErrorPayload {
                 kind: "validation",
                 message: format!("{detail}. Correct the request and try again."),
                 status_code: None,
+                applied_symbols: None,
             },
             Self::Authentication { capability } => payload(
                 "authentication",
@@ -130,9 +142,26 @@ impl TiingoError {
                 ),
                 None,
             ),
+            Self::PartialWebSocketUpdate {
+                source,
+                applied_symbols,
+            } => {
+                let mut payload = source.payload();
+                payload.message.push_str(
+                    " The update partially applied; appliedSymbols is the current subscription inventory.",
+                );
+                payload.applied_symbols = Some(applied_symbols.clone());
+                payload
+            }
             Self::Decode { capability } => payload(
                 "decode",
                 format!("Tiingo returned an unreadable response for {capability}. Retry shortly."),
+                None,
+            ),
+            Self::WebSocketProtocol { .. } => payload(
+                "websocket_protocol",
+                "Tiingo returned a malformed WebSocket message. Stop the subscription and retry."
+                    .into(),
                 None,
             ),
             Self::ResponseTooLarge { capability, limit } => payload(
@@ -160,6 +189,13 @@ impl TiingoError {
             }
         }
     }
+
+    pub(crate) fn with_applied_websocket_symbols(self, applied_symbols: Vec<String>) -> Self {
+        Self::PartialWebSocketUpdate {
+            source: Box::new(self),
+            applied_symbols,
+        }
+    }
 }
 
 fn payload(kind: &'static str, message: String, status_code: Option<u16>) -> ErrorPayload<'static> {
@@ -167,6 +203,7 @@ fn payload(kind: &'static str, message: String, status_code: Option<u16>) -> Err
         kind,
         message,
         status_code,
+        applied_symbols: None,
     }
 }
 

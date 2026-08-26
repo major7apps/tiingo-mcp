@@ -134,3 +134,66 @@ pub fn validate_path_segment(value: &str) -> Result<(), TiingoError> {
     }
     Ok(())
 }
+
+pub fn validate_column_list(columns: Option<&[String]>) -> Result<Option<String>, TiingoError> {
+    let Some(columns) = columns else {
+        return Ok(None);
+    };
+    if columns.is_empty() || columns.len() > 32 {
+        return Err(TiingoError::Validation(
+            "columns must contain between 1 and 32 identifiers".to_owned(),
+        ));
+    }
+    if columns.iter().any(|column| {
+        let mut characters = column.chars();
+        !matches!(characters.next(), Some(character) if character.is_ascii_alphabetic() || character == '_')
+            || !characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+    }) {
+        return Err(TiingoError::Validation(
+            "columns must contain only ASCII identifier names".to_owned(),
+        ));
+    }
+    Ok(Some(columns.join(",")))
+}
+
+pub fn normalize_symbol_list(values: &[String]) -> Result<String, TiingoError> {
+    if values.is_empty() || values.len() > 100 {
+        return Err(TiingoError::Validation(
+            "tickers must contain between 1 and 100 values".to_owned(),
+        ));
+    }
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        let value = value.trim();
+        validate_path_segment(value)?;
+        normalized.push(value.to_ascii_lowercase());
+    }
+    Ok(normalized.join(","))
+}
+
+pub fn validate_ticker_metadata_columns(columns: &[String]) -> Result<(), TiingoError> {
+    if columns.is_empty() || columns.len() > 32 {
+        return Err(TiingoError::Validation(
+            "columns must contain between 1 and 32 ticker metadata fields".to_owned(),
+        ));
+    }
+    if columns.iter().any(|column| {
+        !matches!(
+            column.as_str(),
+            "ticker"
+                | "permaTicker"
+                | "name"
+                | "openfigi"
+                | "exchange"
+                | "assetType"
+                | "isActive"
+                | "startDate"
+                | "endDate"
+        )
+    }) {
+        return Err(TiingoError::Validation(
+            "columns contain an unsupported ticker metadata field".to_owned(),
+        ));
+    }
+    Ok(())
+}

@@ -1,10 +1,19 @@
 use super::{
     TiingoClient,
-    query::{DateRange, IntradayResample, validate_path_segment},
+    query::{DateRange, IntradayResample, normalize_symbol_list, validate_path_segment},
 };
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    pub async fn get_forex_quotes(
+        &self,
+        tickers: &[String],
+    ) -> Result<serde_json::Value, TiingoError> {
+        let tickers = normalize_symbol_list(tickers)?;
+        self.get_json("forex quotes", "/tiingo/fx/top", &[("tickers", tickers)])
+            .await
+    }
+
     pub async fn get_forex_quote(&self, ticker: &str) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         self.get_json("forex quote", &format!("/tiingo/fx/{ticker}/top"), &[])

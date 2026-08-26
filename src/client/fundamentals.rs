@@ -1,6 +1,6 @@
 use super::{
     TiingoClient,
-    query::{DateRange, validate_path_segment},
+    query::{DateRange, validate_column_list, validate_path_segment},
 };
 use crate::error::TiingoError;
 
@@ -34,10 +34,14 @@ impl TiingoClient {
         &self,
         ticker: &str,
         range: DateRange,
+        columns: Option<&[String]>,
     ) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         let mut query = Vec::new();
         range.append(&mut query);
+        if let Some(value) = validate_column_list(columns)? {
+            query.push(("columns", value));
+        }
         self.get_json(
             "daily fundamentals",
             &format!("/tiingo/fundamentals/{ticker}/daily"),
@@ -46,15 +50,19 @@ impl TiingoClient {
         .await
     }
 
-    pub async fn get_company_meta(&self, tickers: &str) -> Result<serde_json::Value, TiingoError> {
+    pub async fn get_company_meta(
+        &self,
+        tickers: &str,
+        columns: Option<&[String]>,
+    ) -> Result<serde_json::Value, TiingoError> {
         if tickers.is_empty() {
             return Err(TiingoError::Validation("tickers cannot be empty".into()));
         }
-        self.get_json(
-            "company metadata",
-            "/tiingo/fundamentals/meta",
-            &[("tickers", tickers.to_owned())],
-        )
-        .await
+        let mut query = vec![("tickers", tickers.to_owned())];
+        if let Some(value) = validate_column_list(columns)? {
+            query.push(("columns", value));
+        }
+        self.get_json("company metadata", "/tiingo/fundamentals/meta", &query)
+            .await
     }
 }

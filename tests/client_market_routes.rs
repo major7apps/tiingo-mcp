@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use tiingo_mcp::{
     client::{
         TiingoClient,
-        query::{DateRange, EodResample, IexResample, IntradayResample},
+        query::{DateRange, EodResample, IexResample, IntradayResample, NewsSort},
     },
     config::{Config, RetryPolicy},
     error::TiingoError,
@@ -30,6 +30,47 @@ fn populated_range() -> DateRange {
         start_date: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
         end_date: Some(NaiveDate::from_ymd_opt(2024, 1, 31).unwrap()),
     }
+}
+
+#[test]
+fn query_enums_match_every_supported_tiingo_wire_value() {
+    assert_eq!(
+        [
+            EodResample::Daily.as_str(),
+            EodResample::Weekly.as_str(),
+            EodResample::Monthly.as_str(),
+            EodResample::Annually.as_str(),
+        ],
+        ["daily", "weekly", "monthly", "annually"]
+    );
+    assert_eq!(
+        [
+            IntradayResample::OneMinute.as_str(),
+            IntradayResample::FiveMinutes.as_str(),
+            IntradayResample::FifteenMinutes.as_str(),
+            IntradayResample::ThirtyMinutes.as_str(),
+            IntradayResample::OneHour.as_str(),
+            IntradayResample::OneDay.as_str(),
+        ],
+        ["1min", "5min", "15min", "30min", "1hour", "1day"]
+    );
+    assert_eq!(
+        [
+            IexResample::OneMinute.as_str(),
+            IexResample::FiveMinutes.as_str(),
+            IexResample::FifteenMinutes.as_str(),
+            IexResample::ThirtyMinutes.as_str(),
+            IexResample::OneHour.as_str(),
+        ],
+        ["1min", "5min", "15min", "30min", "1hour"]
+    );
+    assert_eq!(
+        [
+            NewsSort::CrawlDate.as_str(),
+            NewsSort::PublishedDate.as_str()
+        ],
+        ["crawlDate", "publishedDate"]
+    );
 }
 
 #[tokio::test]
@@ -111,7 +152,12 @@ async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
     );
     assert_eq!(
         client
-            .get_intraday_prices("AAPL", populated_range(), Some(IexResample::FiveMinutes))
+            .get_intraday_prices(
+                "AAPL",
+                populated_range(),
+                Some(IexResample::FiveMinutes),
+                None,
+            )
             .await
             .unwrap(),
         serde_json::json!({"route": "intraday"})
@@ -183,6 +229,241 @@ async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
 }
 
 #[tokio::test]
+async fn iex_snapshot_intraday_columns_and_forex_batch_use_exact_routes_and_queries() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+
+    for route in ["/iex", "/iex/AAPL/prices", "/tiingo/fx/top"] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    client.get_iex_market_snapshot().await.unwrap();
+    client
+        .get_intraday_prices(
+            "AAPL",
+            populated_range(),
+            Some(IexResample::FiveMinutes),
+            Some(&["ticker".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_forex_quotes(&[" EURUSD ".to_owned(), "GBPUSD".to_owned()])
+        .await
+        .unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            ("/iex".to_owned(), vec![]),
+            (
+                "/iex/AAPL/prices".to_owned(),
+                vec![
+                    ("columns".to_owned(), "ticker,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("resampleFreq".to_owned(), "5min".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            (
+                "/tiingo/fx/top".to_owned(),
+                vec![("tickers".to_owned(), "eurusd,gbpusd".to_owned())],
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn equity_and_boats_clients_use_exact_routes_queries_and_omit_absent_values() {
+    let server = MockServer::start().await;
+    let response = ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}));
+
+    for route in [
+        "/tiingo/equity/intraday",
+        "/tiingo/equity/intraday/AAPL",
+        "/tiingo/equity/intraday/AAPL/prices",
+        "/tiingo/equity/intraday/MSFT/prices",
+        "/boats",
+        "/boats/AAPL",
+        "/boats/AAPL/prices",
+        "/boats/MSFT/prices",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response.clone())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    client.get_equity_realtime_snapshot(None).await.unwrap();
+    client
+        .get_equity_realtime_snapshot(Some("AAPL"))
+        .await
+        .unwrap();
+    client
+        .get_equity_intraday_prices(
+            "AAPL",
+            populated_range(),
+            Some(IntradayResample::FiveMinutes),
+            Some(true),
+            Some(true),
+            Some(&["date".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_equity_intraday_prices("MSFT", DateRange::default(), None, None, None, None)
+        .await
+        .unwrap();
+    client.get_boats_snapshot(None).await.unwrap();
+    client.get_boats_snapshot(Some("AAPL")).await.unwrap();
+    client
+        .get_boats_prices(
+            "AAPL",
+            populated_range(),
+            Some(IntradayResample::OneHour),
+            Some(false),
+            Some(&["ticker".to_owned(), "close".to_owned()]),
+        )
+        .await
+        .unwrap();
+    client
+        .get_boats_prices("MSFT", DateRange::default(), None, None, None)
+        .await
+        .unwrap();
+
+    let mut routes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            let mut query = request
+                .url
+                .query_pairs()
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query.sort_unstable();
+            (request.url.path().to_owned(), query)
+        })
+        .collect::<Vec<_>>();
+    routes.sort_unstable();
+
+    assert_eq!(
+        routes,
+        vec![
+            ("/boats".to_owned(), vec![]),
+            ("/boats/AAPL".to_owned(), vec![]),
+            (
+                "/boats/AAPL/prices".to_owned(),
+                vec![
+                    ("afterHours".to_owned(), "false".to_owned()),
+                    ("columns".to_owned(), "ticker,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("resampleFreq".to_owned(), "1hour".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            ("/boats/MSFT/prices".to_owned(), vec![]),
+            ("/tiingo/equity/intraday".to_owned(), vec![]),
+            ("/tiingo/equity/intraday/AAPL".to_owned(), vec![]),
+            (
+                "/tiingo/equity/intraday/AAPL/prices".to_owned(),
+                vec![
+                    ("afterHours".to_owned(), "true".to_owned()),
+                    ("columns".to_owned(), "date,close".to_owned()),
+                    ("endDate".to_owned(), "2024-01-31".to_owned()),
+                    ("forceFill".to_owned(), "true".to_owned()),
+                    ("resampleFreq".to_owned(), "5min".to_owned()),
+                    ("startDate".to_owned(), "2024-01-01".to_owned()),
+                ],
+            ),
+            ("/tiingo/equity/intraday/MSFT/prices".to_owned(), vec![]),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn market_column_and_forex_pair_lists_reject_invalid_values_before_requesting_tiingo() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    for columns in [
+        vec![],
+        vec!["".to_owned()],
+        vec!["1invalid".to_owned()],
+        vec!["close".to_owned(); 33],
+    ] {
+        let error = client
+            .get_intraday_prices("AAPL", DateRange::default(), None, Some(&columns))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+    }
+
+    for pairs in [
+        vec![],
+        vec!["".to_owned()],
+        vec!["eur/usd".to_owned()],
+        vec!["eurusd".to_owned(); 101],
+    ] {
+        let error = client.get_forex_quotes(&pairs).await.unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn absent_intraday_columns_omit_the_query_parameter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/iex/AAPL/prices"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    client
+        .get_intraday_prices("AAPL", DateRange::default(), None, None)
+        .await
+        .unwrap();
+
+    assert!(
+        server.received_requests().await.unwrap()[0]
+            .url
+            .query()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn rejects_unsafe_path_symbols_before_requesting_tiingo() {
     let server = MockServer::start().await;
     let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
@@ -190,7 +471,328 @@ async fn rejects_unsafe_path_symbols_before_requesting_tiingo() {
     for ticker in [".", "..", "A/APL", "A?APL", "A#APL", "A%APL"] {
         let error = client.get_stock_metadata(ticker).await.unwrap_err();
         assert!(matches!(error, TiingoError::Validation(_)));
+
+        let error = client
+            .get_equity_realtime_snapshot(Some(ticker))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+
+        let error = client.get_boats_snapshot(Some(ticker)).await.unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
     }
 
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_use_the_csv_route_and_preserve_raw_adjusted_fields() {
+    let server = MockServer::start().await;
+    let csv = concat!(
+        "date,ticker,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjClose,adjVolume,divCash,splitFactor\n",
+        "2024-01-02,AAPL,100,105,99,104,1000,50,52.5,49.5,52,2000,0,2\n",
+        "2024-01-02,MSFT,200,205,199,204,3000,200,205,199,204,3000,1.25,1\n",
+        "2024-01-02,\"BRK,\"\"B\",300,305,299,304,4000,300,305,299,304,4000,0,1\n"
+    );
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/prices"))
+        .and(query_param("format", "csv"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(csv))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    assert_eq!(
+        client.get_bulk_eod_prices().await.unwrap(),
+        serde_json::json!({
+            "prices": [
+                {
+                    "date": "2024-01-02",
+                    "ticker": "AAPL",
+                    "open": 100.0,
+                    "high": 105.0,
+                    "low": 99.0,
+                    "close": 104.0,
+                    "volume": 1000.0,
+                    "adjOpen": 50.0,
+                    "adjHigh": 52.5,
+                    "adjLow": 49.5,
+                    "adjClose": 52.0,
+                    "adjVolume": 2000.0,
+                    "divCash": 0.0,
+                    "splitFactor": 2.0
+                },
+                {
+                    "date": "2024-01-02",
+                    "ticker": "MSFT",
+                    "open": 200.0,
+                    "high": 205.0,
+                    "low": 199.0,
+                    "close": 204.0,
+                    "volume": 3000.0,
+                    "adjOpen": 200.0,
+                    "adjHigh": 205.0,
+                    "adjLow": 199.0,
+                    "adjClose": 204.0,
+                    "adjVolume": 3000.0,
+                    "divCash": 1.25,
+                    "splitFactor": 1.0
+                },
+                {
+                    "date": "2024-01-02",
+                    "ticker": "BRK,\"B",
+                    "open": 300.0,
+                    "high": 305.0,
+                    "low": 299.0,
+                    "close": 304.0,
+                    "volume": 4000.0,
+                    "adjOpen": 300.0,
+                    "adjHigh": 305.0,
+                    "adjLow": 299.0,
+                    "adjClose": 304.0,
+                    "adjVolume": 4000.0,
+                    "divCash": 0.0,
+                    "splitFactor": 1.0
+                }
+            ],
+            "historyRefreshTickers": ["AAPL", "MSFT"]
+        })
+    );
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_read_named_csv_headers_when_tiingo_reorders_columns() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/prices"))
+        .and(query_param("format", "csv"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+            "ticker,splitFactor,adjClose,date,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjVolume,divCash\n",
+            "AAPL,1,99,2024-01-02,100,105,98,101,1000,98,103,96,1000,0\n"
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    let result = client.get_bulk_eod_prices().await.unwrap();
+
+    assert_eq!(result["prices"][0]["date"], "2024-01-02");
+    assert_eq!(result["prices"][0]["ticker"], "AAPL");
+    assert_eq!(result["prices"][0]["close"], 101.0);
+    assert_eq!(result["prices"][0]["adjClose"], 99.0);
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_reject_malformed_numeric_csv_fields() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+            "date,ticker,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjClose,adjVolume,divCash,splitFactor\n",
+            "2024-01-02,AAPL,not-a-number,105,99,104,1000,100,105,99,104,1000,0,1\n"
+        )))
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+    assert!(matches!(error, TiingoError::Decode { .. }));
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_reject_blank_identity_fields() {
+    for (date, ticker) in [
+        ("", "AAPL"),
+        ("   ", "AAPL"),
+        ("2024-01-02", ""),
+        ("2024-01-02", "   "),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "date,ticker,open,high,low,close,volume,adjOpen,adjHigh,adjLow,adjClose,adjVolume,divCash,splitFactor\n{date},{ticker},100,105,99,104,1000,100,105,99,104,1000,0,1\n"
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+        let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+        assert!(
+            matches!(error, TiingoError::Decode { .. }),
+            "date={date:?}, ticker={ticker:?} was accepted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_reject_every_non_finite_financial_field() {
+    let headers = [
+        "date",
+        "ticker",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "adjOpen",
+        "adjHigh",
+        "adjLow",
+        "adjClose",
+        "adjVolume",
+        "divCash",
+        "splitFactor",
+    ];
+    for (field, value) in [
+        ("open", "NaN"),
+        ("high", "inf"),
+        ("low", "-inf"),
+        ("close", "1e9999"),
+        ("volume", "NaN"),
+        ("adjOpen", "inf"),
+        ("adjHigh", "-inf"),
+        ("adjLow", "1e9999"),
+        ("adjClose", "NaN"),
+        ("adjVolume", "inf"),
+        ("divCash", "-inf"),
+        ("splitFactor", "1e9999"),
+    ] {
+        let server = MockServer::start().await;
+        let mut row = vec!["1"; headers.len()];
+        row[0] = "2024-01-02";
+        row[1] = "AAPL";
+        row[12] = "0";
+        row[13] = "1";
+        row[headers.iter().position(|header| *header == field).unwrap()] = value;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                "{}\n{}\n",
+                headers.join(","),
+                row.join(",")
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+        let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+        assert!(
+            matches!(error, TiingoError::Decode { .. }),
+            "{field}={value} was accepted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_reject_csv_without_the_required_headers() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+    assert!(matches!(error, TiingoError::Decode { .. }));
+}
+
+#[tokio::test]
+async fn bulk_eod_prices_reject_oversized_csv_responses() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("x".repeat(8 * 1024 * 1024 + 1)))
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    let error = client.get_bulk_eod_prices().await.unwrap_err();
+
+    assert!(matches!(error, TiingoError::ResponseTooLarge { .. }));
+}
+
+#[tokio::test]
+async fn ticker_metadata_rejects_missing_empty_oversized_and_invalid_columns_locally() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    for columns in [
+        vec![],
+        vec!["".to_owned()],
+        vec!["ticker".to_owned(); 33],
+        vec!["not-a-ticker-metadata-column".to_owned()],
+    ] {
+        let error = client.get_ticker_metadata(&columns).await.unwrap_err();
+        assert!(matches!(error, TiingoError::Validation(_)));
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn ticker_metadata_serializes_valid_columns_once_in_caller_order() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/meta"))
+        .and(query_param("columns", "ticker,permaTicker,openfigi"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "ticker": "AAPL",
+                "permaTicker": "AAPL",
+                "openfigi": "BBG000B9XRY4"
+            }])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    assert_eq!(
+        client
+            .get_ticker_metadata(&[
+                "ticker".to_owned(),
+                "permaTicker".to_owned(),
+                "openfigi".to_owned(),
+            ])
+            .await
+            .unwrap(),
+        serde_json::json!([{
+            "ticker": "AAPL",
+            "permaTicker": "AAPL",
+            "openfigi": "BBG000B9XRY4"
+        }])
+    );
+    let request = server.received_requests().await.unwrap().pop().unwrap();
+    assert_eq!(
+        request
+            .url
+            .query_pairs()
+            .filter(|(name, _)| name == "columns")
+            .collect::<Vec<_>>(),
+        vec![("columns".into(), "ticker,permaTicker,openfigi".into())]
+    );
+}
+
+#[tokio::test]
+async fn ticker_metadata_preserves_vendor_supplied_route_not_found_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tiingo/daily/meta"))
+        .and(query_param("columns", "ticker"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not available"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    let error = client
+        .get_ticker_metadata(&["ticker".to_owned()])
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, TiingoError::NotFound { .. }));
 }

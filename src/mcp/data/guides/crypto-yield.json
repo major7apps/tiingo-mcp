@@ -1,0 +1,28 @@
+{
+  "asset_class": "crypto-yield",
+  "availability": {
+    "as_of": "2026-08-25",
+    "official_sources": [
+      "https://www.tiingo.com/documentation/crypto-yield"
+    ],
+    "statement": "Crypto Yield access is plan and entitlement dependent; a 403 means this credential is not entitled to the requested capability."
+  },
+  "common_pitfalls": [
+    "Pool and platform codes are identifiers, not display names.",
+    "Omitting list filters can return large responses; filter whenever the codes are known.",
+    "Historical metrics require one pool code and support bounded date/resample parameters."
+  ],
+  "description": "Crypto lending platforms, pools, latest ticks, and historical pool metrics.",
+  "ticker_format": "Platform and pool codes, e.g. aavev2 and aavev2_usdc",
+  "tools": [
+    "get_crypto_yield_platforms",
+    "get_crypto_yield_pools",
+    "get_crypto_yield_ticks",
+    "get_crypto_yield_metrics"
+  ],
+  "workflows": [
+    "List platforms first when the relevant platform code is unknown.",
+    "List or filter pools to discover the pool code required by historical metrics.",
+    "Use latest ticks for a bounded current view and one-pool metrics for historical analysis."
+  ]
+}

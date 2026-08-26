@@ -10,9 +10,13 @@ const DEFINITIONS: &str = include_str!("data/fundamentals-definitions.json");
 const DATE_FORMATS: &str = include_str!("data/date-formats.json");
 const GUIDE_CORPORATE_ACTIONS: &str = include_str!("data/guides/corporate-actions.json");
 const GUIDE_CRYPTO: &str = include_str!("data/guides/crypto.json");
+const GUIDE_CRYPTO_YIELD: &str = include_str!("data/guides/crypto-yield.json");
 const GUIDE_FOREX: &str = include_str!("data/guides/forex.json");
+const GUIDE_FUNDS: &str = include_str!("data/guides/funds.json");
 const GUIDE_FUNDAMENTALS: &str = include_str!("data/guides/fundamentals.json");
+const GUIDE_MARKET_DATA: &str = include_str!("data/guides/market-data.json");
 const GUIDE_NEWS: &str = include_str!("data/guides/news.json");
+const GUIDE_SEARCH: &str = include_str!("data/guides/search.json");
 const GUIDE_STOCKS: &str = include_str!("data/guides/stocks.json");
 
 pub fn list() -> Vec<Resource> {
@@ -65,15 +69,19 @@ pub fn read(uri: &str) -> Result<ReadResourceResult, ErrorData> {
         "tiingo://guide/date-formats" => DATE_FORMATS.to_owned(),
         "tiingo://guide/corporate-actions" => GUIDE_CORPORATE_ACTIONS.to_owned(),
         "tiingo://guide/crypto" => GUIDE_CRYPTO.to_owned(),
+        "tiingo://guide/crypto-yield" => GUIDE_CRYPTO_YIELD.to_owned(),
         "tiingo://guide/forex" => GUIDE_FOREX.to_owned(),
+        "tiingo://guide/funds" => GUIDE_FUNDS.to_owned(),
         "tiingo://guide/fundamentals" => GUIDE_FUNDAMENTALS.to_owned(),
+        "tiingo://guide/market-data" => GUIDE_MARKET_DATA.to_owned(),
         "tiingo://guide/news" => GUIDE_NEWS.to_owned(),
+        "tiingo://guide/search" => GUIDE_SEARCH.to_owned(),
         "tiingo://guide/stocks" => GUIDE_STOCKS.to_owned(),
         value if value.starts_with("tiingo://guide/") => {
             let name = &value["tiingo://guide/".len()..];
             let error = serde_json::json!({
                 "error": format!(
-                    "Invalid asset class '{name}'. Valid values: corporate-actions, crypto, forex, fundamentals, news, stocks"
+                    "Invalid asset class '{name}'. Valid values: corporate-actions, crypto, crypto-yield, forex, funds, fundamentals, market-data, news, search, stocks"
                 )
             });
             return Ok(ReadResourceResult::new(vec![
