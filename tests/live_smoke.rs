@@ -399,16 +399,14 @@ async fn live_market_data_lifecycle(
             registry.shutdown().await;
             anyhow::bail!("LIVE {capability}: bounded poll returned more than one event");
         }
-        if let Some(event) = poll.events.first() {
-            if !matches!(
+        if let Some(event) = poll.events.first()
+            && !matches!(
                 event.payload.get("messageType").and_then(Value::as_str),
                 Some("A" | "H")
-            ) {
-                registry.shutdown().await;
-                anyhow::bail!(
-                    "LIVE {capability}: bounded poll returned an unexpected message type"
-                );
-            }
+            )
+        {
+            registry.shutdown().await;
+            anyhow::bail!("LIVE {capability}: bounded poll returned an unexpected message type");
         }
         match stop {
             Ok(Ok(_)) => {}
