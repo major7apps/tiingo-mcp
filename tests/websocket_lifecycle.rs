@@ -5033,6 +5033,20 @@ async fn entitlement_rejection_after_activation_is_terminal_sanitized_and_not_re
     assert!(!snapshots.contains("upstream-secret"));
     assert!(requested_delays.try_recv().is_err());
     assert!(server.await.expect("mock server exits"));
+    let stopped = registry
+        .stop(&started.id)
+        .await
+        .expect("terminal subscription cleanup succeeds");
+    assert_eq!(stopped.state, SubscriptionStatus::Stopped);
+    let retained = registry
+        .poll_with_bounds(&started.id, u64::MAX, 1, Duration::ZERO)
+        .await
+        .expect("terminal tombstone remains inspectable after stop");
+    assert_eq!(retained.state, SubscriptionStatus::Failed);
+    assert_eq!(
+        retained.terminal_error,
+        Some(TerminalErrorKind::Entitlement)
+    );
     registry.shutdown().await;
 }
 

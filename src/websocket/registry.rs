@@ -729,14 +729,16 @@ async fn set_status_and_terminal_error(
 ) {
     {
         let mut data = session.data.lock().await;
-        if is_terminal(status) && !is_terminal(data.status) {
-            let terminal_order = session.terminal_counter.fetch_add(1, Ordering::AcqRel) + 1;
-            session
-                .terminal_order
-                .store(terminal_order, Ordering::Release);
+        if !is_terminal(data.status) {
+            if is_terminal(status) {
+                let terminal_order = session.terminal_counter.fetch_add(1, Ordering::AcqRel) + 1;
+                session
+                    .terminal_order
+                    .store(terminal_order, Ordering::Release);
+            }
+            data.status = status;
+            data.terminal_error = terminal_error;
         }
-        data.status = status;
-        data.terminal_error = terminal_error;
     }
     if is_terminal(status) && session.active_slot_held.swap(false, Ordering::AcqRel) {
         session.active_sessions.fetch_sub(1, Ordering::AcqRel);
