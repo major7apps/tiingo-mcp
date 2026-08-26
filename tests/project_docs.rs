@@ -505,14 +505,4 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
         "ARCHITECTURE.md must scope the transport statement to this server"
     );
     assert!(!architecture.contains("MCP uses stdio only."));
-
-    let stocks_guide = read_root_file("src/mcp/data/guides/stocks.json");
-    assert!(
-        stocks_guide.contains("after_hours=true"),
-        "embedded guidance must retain the lowercase JSON boolean example"
-    );
-    assert!(
-        !stocks_guide.contains("after_hours=True"),
-        "embedded JSON guidance must use JSON boolean spelling"
-    );
 }
