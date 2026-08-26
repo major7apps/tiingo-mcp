@@ -512,6 +512,14 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
         "README.md must document sanitized terminal WebSocket classifications"
     );
     assert!(
+        readme.contains("Published 2.0.2 installers and the crates.io package expose the released 17-tool surface"),
+        "README.md must distinguish the published release from the unreleased tool expansion"
+    );
+    assert!(
+        readme.contains("The unreleased development tree exposes 38 tools"),
+        "README.md must identify the 38-tool surface as unreleased"
+    );
+    assert!(
         architecture.contains("frame and reassembled-message limits"),
         "ARCHITECTURE.md must document concrete socket-level message bounds"
     );

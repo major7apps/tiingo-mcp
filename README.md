@@ -3,11 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml)
 
-A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. It exposes EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions through 38 tools, three fixed resources, one resource template, and five prompts.
+A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. The unreleased development tree exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts.
 
 The server uses MCP over stdio. Its finite subscription tools connect to upstream Tiingo WebSockets; MCP Streamable HTTP and WebSocket transports are not part of this server.
 
 ## Installation
+
+Published 2.0.2 installers and the crates.io package expose the released 17-tool surface. The expanded 38-tool surface documented below is Unreleased and requires building this development branch from source; the release URLs remain pinned to the latest published tag.
 
 ### Release installer
 
@@ -78,6 +80,8 @@ TIINGO_API_KEY=your-api-key-here tiingo-mcp
 `tiingo-mcp` starts the stdio MCP server by default, writes protocol messages only to stdout, and sends diagnostics to stderr. It exits cleanly when stdin closes.
 
 ## Tools
+
+This is the Unreleased 38-tool development surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
 
 ### Stocks (EOD and lifecycle metadata)
 
@@ -191,7 +195,7 @@ Seed each ticker's history from `/tiingo/daily/{ticker}/prices`. Refresh daily w
 Access is determined by the capabilities attached to the caller's Tiingo key; this project does not promise access from a named plan. HTTP 401 means Tiingo rejected the credential. HTTP 403 means the credential is valid but the account is not entitled to the requested capability.
 
 - IEX upstream subscriptions default to derived-reference threshold 6. Levels 0 and 5 are accepted only when the caller explicitly confirms a direct IEX market-data agreement.
-- Consolidated equity is beta, operates 4am–8pm ET, and supports threshold 6 reference ticks or threshold 4 liquidity/top-of-book derived data.
+- Consolidated equity is beta, operates 4am–8pm ET, and supports reference ticks at threshold 6 or liquidity/top-of-book-derived data at threshold 4.
 - BOATS REST is a separate beta/add-on for 8pm–3:59am ET. It is not combined with consolidated equity into a unified 24x5 endpoint.
 - Fund-fee data is restricted to enterprise/institutional access. Fundamentals and corporate actions are entitlement dependent.
 - Search is early beta. Crypto Yield is plan/entitlement dependent. `/tiingo/daily/meta` is vendor-supplied and availability dependent; a 404 does not imply another route.
