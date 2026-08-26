@@ -141,9 +141,15 @@ pub(super) async fn run_worker(
                         .await;
                         match update {
                             Controlled::Cancelled => {
-                                let _ = response.send(Err(TiingoError::Transport {
+                                let error = TiingoError::Transport {
                                     capability: CAPABILITY,
-                                }));
+                                };
+                                let error = if symbols != symbols_before_update {
+                                    error.with_applied_websocket_symbols(symbols.clone())
+                                } else {
+                                    error
+                                };
+                                let _ = response.send(Err(error));
                                 close_socket(
                                     &mut socket,
                                     &codec,
@@ -156,9 +162,15 @@ pub(super) async fn run_worker(
                                 return;
                             }
                             Controlled::Expired => {
-                                let _ = response.send(Err(TiingoError::Timeout {
+                                let error = TiingoError::Timeout {
                                     capability: CAPABILITY,
-                                }));
+                                };
+                                let error = if symbols != symbols_before_update {
+                                    error.with_applied_websocket_symbols(symbols.clone())
+                                } else {
+                                    error
+                                };
+                                let _ = response.send(Err(error));
                                 close_socket(
                                     &mut socket,
                                     &codec,

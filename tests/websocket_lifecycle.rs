@@ -1543,13 +1543,12 @@ async fn inactive_subscription_expires_after_five_minutes_despite_heartbeats() {
 }
 
 #[tokio::test]
-async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
+async fn partial_update_reports_applied_symbols_at_absolute_expiry() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock WebSocket server");
     let endpoint = format!("ws://{}", listener.local_addr().expect("listener address"));
-    let (activity, mut activities) =
-        tokio::sync::mpsc::unbounded_channel::<(u8, tokio::sync::oneshot::Sender<()>)>();
+    let (add_seen, add_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("accept client");
         let mut socket = accept_async(stream).await.expect("WebSocket handshake");
@@ -1569,35 +1568,43 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
             ))
             .await
             .expect("send acknowledgement");
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
+        let mut removed = false;
+        let mut add_seen = Some(add_seen);
         loop {
             tokio::select! {
-                activity = activities.recv() => {
-                    let Some((index, processed)) = activity else { return };
-                    socket.send(Message::text(json!({
-                        "messageType": "A",
-                        "service": "iex",
-                        "data": ["2026-08-25T14:00:00Z", "AAPL", index as f64]
-                    }).to_string())).await.expect("send market event");
-                    let ping_payload = vec![index];
-                    socket
-                        .send(Message::Ping(ping_payload.clone().into()))
-                        .await
-                        .expect("send market event processing barrier");
-                    loop {
-                        match socket.next().await {
-                            Some(Ok(Message::Pong(payload))) if payload.as_ref() == ping_payload => {
-                                break;
-                            }
-                            Some(Ok(_)) => {}
-                            Some(Err(error)) => panic!("receive market event barrier: {error}"),
-                            None => panic!("market event barrier socket remains open"),
-                        }
+                _ = heartbeat.tick() => {
+                    if socket.send(Message::text(json!({
+                        "messageType": "H",
+                        "response": {"code": 200, "message": "heartbeat"}
+                    }).to_string())).await.is_err() {
+                        return;
                     }
-                    processed.send(()).expect("record processed market event");
                 }
                 incoming = socket.next() => match incoming {
+                    Some(Ok(Message::Text(payload))) if !removed => {
+                        let payload: serde_json::Value =
+                            serde_json::from_str(&payload).expect("remove JSON");
+                        assert_eq!(payload["eventName"], "unsubscribe");
+                        socket.send(Message::text(json!({
+                            "messageType": "I",
+                            "data": {"subscriptionId": "expiry-remove-id"},
+                            "response": {"code": 200, "message": "updated"}
+                        }).to_string())).await.expect("acknowledge remove");
+                        removed = true;
+                    }
+                    Some(Ok(Message::Text(payload))) => {
+                        let payload: serde_json::Value =
+                            serde_json::from_str(&payload).expect("add JSON");
+                        if let Some(add_seen) = add_seen.take() {
+                            assert_eq!(payload["eventName"], "subscribe");
+                            add_seen.send(()).expect("record pending add");
+                        }
+                    }
                     Some(Ok(Message::Close(_))) | None => return,
-                    _ => {}
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) if add_seen.is_none() => return,
+                    Some(Err(error)) => panic!("receive client message: {error}"),
                 }
             }
         }
@@ -1608,7 +1615,7 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
     let started = registry
         .start(StartRequest {
             service: Service::Iex,
-            symbols: vec!["AAPL".into()],
+            symbols: vec!["AAPL".into(), "MSFT".into()],
             threshold_level: None,
             confirm_iex_market_data_agreement: false,
         })
@@ -1616,37 +1623,53 @@ async fn active_subscription_expires_at_thirty_minute_absolute_lifetime() {
         .expect("subscription starts");
 
     tokio::time::pause();
-    let mut after_sequence = 0;
-    for index in 1..=29 {
+    for _ in 0..29 {
         tokio::time::advance(Duration::from_secs(60)).await;
-        tokio::time::resume();
-        let (processed, processing_complete) = tokio::sync::oneshot::channel();
-        activity
-            .send((index, processed))
-            .expect("request minute market event");
-        processing_complete
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        registry
+            .poll_with_bounds(&started.id, 0, 1, Duration::ZERO)
             .await
-            .expect("worker processes minute market event");
-        let poll = registry
-            .poll(&started.id, after_sequence)
-            .await
-            .expect("minute poll succeeds");
-        after_sequence = poll.events.last().expect("minute event").sequence;
-        tokio::time::pause();
+            .expect("minute touch succeeds");
     }
     assert!(
         !server.is_finished(),
         "activity keeps the idle deadline refreshed"
     );
-    tokio::time::advance(Duration::from_secs(60)).await;
-    tokio::time::advance(Duration::from_millis(1)).await;
+    tokio::time::advance(Duration::from_secs(56)).await;
+    let update_registry = registry.clone();
+    let update_id = started.id.clone();
+    let update = tokio::spawn(async move {
+        update_registry
+            .update(
+                &update_id,
+                UpdateRequest {
+                    add_symbols: vec!["NVDA".into()],
+                    remove_symbols: vec!["AAPL".into()],
+                    threshold_level: None,
+                },
+            )
+            .await
+    });
+    tokio::time::resume();
+    add_received.await.expect("server sees pending add");
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(4)).await;
+    let error = update
+        .await
+        .expect("update task joins")
+        .expect_err("absolute expiry interrupts the pending add");
+    let error = serde_json::to_value(error.payload()).expect("serialize expiry update error");
+    assert_eq!(error["kind"], "timeout");
+    assert_eq!(error["appliedSymbols"], json!(["MSFT"]));
     tokio::time::resume();
     tokio::time::timeout(Duration::from_secs(1), server)
         .await
         .expect("absolute expiry closes the socket promptly")
         .expect("mock server exits cleanly");
     let expired = registry
-        .poll(&started.id, after_sequence)
+        .poll_with_bounds(&started.id, 0, 1, Duration::ZERO)
         .await
         .expect("expiry remains inspectable");
     assert_eq!(expired.state, SubscriptionStatus::Expired);
@@ -4014,9 +4037,25 @@ async fn stop_cancels_inflight_update_io_before_the_acknowledgement_deadline() {
         socket
             .next()
             .await
-            .expect("update command")
-            .expect("valid update command");
-        update_seen.send(()).expect("record update command");
+            .expect("remove command")
+            .expect("valid remove command");
+        socket
+            .send(Message::text(
+                json!({
+                    "messageType": "I",
+                    "data": {"subscriptionId": "stop-remove-id"},
+                    "response": {"code": 200, "message": "updated"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("acknowledge remove");
+        socket
+            .next()
+            .await
+            .expect("add command")
+            .expect("valid add command");
+        update_seen.send(()).expect("record add command");
         let _ = ack_released.await;
         let _ = socket
             .send(Message::text(
@@ -4040,7 +4079,7 @@ async fn stop_cancels_inflight_update_io_before_the_acknowledgement_deadline() {
     let started = registry
         .start(StartRequest {
             service: Service::Iex,
-            symbols: vec!["AAPL".into()],
+            symbols: vec!["AAPL".into(), "MSFT".into()],
             threshold_level: None,
             confirm_iex_market_data_agreement: false,
         })
@@ -4053,8 +4092,8 @@ async fn stop_cancels_inflight_update_io_before_the_acknowledgement_deadline() {
             .update(
                 &update_id,
                 UpdateRequest {
-                    add_symbols: vec!["MSFT".into()],
-                    remove_symbols: vec![],
+                    add_symbols: vec!["NVDA".into()],
+                    remove_symbols: vec!["AAPL".into()],
                     threshold_level: None,
                 },
             )
@@ -4077,7 +4116,13 @@ async fn stop_cancels_inflight_update_io_before_the_acknowledgement_deadline() {
     if let Some(stopped) = stopped {
         stopped.expect("stop succeeds after test cleanup");
     }
-    let _ = update.await.expect("update task joins");
+    let error = update
+        .await
+        .expect("update task joins")
+        .expect_err("stop interrupts the pending add");
+    let error = serde_json::to_value(error.payload()).expect("serialize cancelled update error");
+    assert_eq!(error["kind"], "transport");
+    assert_eq!(error["appliedSymbols"], json!(["MSFT"]));
     server.await.expect("mock server exits cleanly");
     registry.shutdown().await;
     assert!(
