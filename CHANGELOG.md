@@ -45,7 +45,7 @@
 ### Breaking changes
 
 - Replaced the server implementation with a native Rust binary built on RMCP.
-- Changed installation and launch to the direct `tiingo-mcp` command; the PyPI and `uvx` contract has been deliberately removed.
+- Changed installation and launch to the direct `tiingo-mcp` command; the legacy Python-package and `uvx` contract has been deliberately removed.
 - Kept stdio as the MCP transport for 2.0. Streamable HTTP and WebSocket work remains a separate expansion.
 
 ### Distribution
@@ -104,5 +104,5 @@ Initial release.
 - Full async implementation with httpx
 - Automatic retries on transient errors
 - Structured error handling (401, 403, 404, 429, 5xx)
-- PyPI-publishable, installable via `uvx tiingo-mcp`
+- Publishable as a Python package and installable via `uvx tiingo-mcp`
 - stdio and HTTP transport support
