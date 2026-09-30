@@ -10,7 +10,7 @@
 
 ### Documentation
 
-- Rewrote the README in plain language, and added steps to download, verify, and install the prebuilt release binaries.
+- Rewrote the README in plain language, and added steps to download, verify, and install the prebuilt release binaries. The install commands now download the latest release instead of a fixed version.
 
 ## 2.1.0 (2026-08-26)
 

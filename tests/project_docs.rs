@@ -516,11 +516,11 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
         "README.md must document sanitized terminal WebSocket classifications"
     );
     assert!(
-        readme.contains("Published 2.1.0 installers, MCPB bundles, and the crates.io package expose the 38-tool surface"),
-        "README.md must describe the published 2.1.0 tool surface"
+        readme.contains("the crates.io package all install the same server with the 38 tools"),
+        "README.md must describe the published 38-tool surface"
     );
     assert!(
-        readme.contains("Version 2.1.0 exposes 38 tools"),
+        readme.contains("The server exposes 38 tools"),
         "README.md must identify the released 38-tool surface"
     );
     assert!(
