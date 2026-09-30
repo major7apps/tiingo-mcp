@@ -63,7 +63,7 @@ shasum -a 256 -c "tiingo-mcp-$TARGET.tar.xz.sha256"
 tar -xJf "tiingo-mcp-$TARGET.tar.xz"
 mkdir -p ~/.local/bin
 install -m 755 "tiingo-mcp-$TARGET/tiingo-mcp" ~/.local/bin/
-tiingo-mcp --version
+~/.local/bin/tiingo-mcp --version
 ```
 
 You can use `sha256sum -c` in place of `shasum -a 256 -c` on Linux. If `~/.local/bin` isn't on your `PATH`, add it, or copy the binary to another directory that is. If you download the archive with a web browser on macOS, macOS may block the binary the first time it runs. You can clear the block with `xattr -d com.apple.quarantine ~/.local/bin/tiingo-mcp`.
@@ -183,7 +183,7 @@ Version 2.1.0 keeps the 17 tools from earlier releases compatible. Their names, 
 | `get_crypto_yield_platforms` | List of crypto lending platforms, with optional filters |
 | `get_crypto_yield_pools` | Metadata for lending pools, filtered by pool or platform |
 | `get_crypto_yield_ticks` | Latest metric values for lending pools |
-| `get_crypto_yield_metrics` | Historical open, high, low, and close metrics for one lending pool |
+| `get_crypto_yield_metrics` | Historical Crypto Yield rate metrics for one lending pool |
 
 ### Forex (beta)
 
@@ -230,12 +230,12 @@ Version 2.1.0 keeps the 17 tools from earlier releases compatible. Their names, 
 
 The subscription tools let a client read live IEX or consolidated equity data for a limited time. First, the client starts a subscription. Second, it polls for new events, and it can add or remove symbols while the subscription is active. Third, it stops the subscription.
 
-Each subscription holds at most 2,048 events or 8 MiB that the client hasn't read yet. If more data arrives than the subscription can hold, the subscription closes with the status `data_gap`, so the client never loses events without knowing. A subscription also closes after 30 minutes, or after five minutes with no calls from the client.
+Each subscription keeps every event it receives, and polling doesn't remove events, so one subscription can receive at most 2,048 events or 8 MiB in total. When the next event would pass either limit, the subscription closes with the state `data_gap`, so the client never loses events without knowing. To keep reading after that, start a new subscription. A subscription also closes after 30 minutes, or after five minutes with no calls from the client.
 
 | Tool | Description |
 |---|---|
 | `start_market_data_subscription` | Start one IEX or consolidated equity subscription with a size and time limit |
-| `poll_market_data_subscription` | Read new events after a sequence number, with a limit on count and wait time; a closed subscription reports the reason in `terminalError` |
+| `poll_market_data_subscription` | Read new events after a sequence number, with a limit on count and wait time; the result's `state` shows whether the subscription is still open |
 | `update_market_data_subscription` | Add or remove symbols on an active subscription; if part of the update fails, the result lists the symbols that are active in `appliedSymbols` |
 | `stop_market_data_subscription` | Close the subscription and release its resources, and it's safe to call more than once |
 
@@ -283,7 +283,7 @@ The server includes reference documents that clients can read without calling th
 
 Each successful tool call returns the result twice, once as JSON text for older clients and once as MCP structured content. When a call fails in a way the client can handle, the server returns an MCP tool error with a short JSON message, and it removes the API key and any sensitive details from that message.
 
-When a subscription closes because of an error, `poll_market_data_subscription` reports one of four reasons in `terminalError`, which are `authentication`, `entitlement`, `transport`, or `protocol`. The server doesn't pass along Tiingo's original error text.
+When a subscription fails, `poll_market_data_subscription` returns the state `failed` and reports one of four reasons in `terminalError`, which are `authentication`, `entitlement`, `transport`, or `protocol`. The server doesn't pass along Tiingo's original error text. A subscription that closes for another reason, such as `data_gap`, `expired`, or `stopped`, reports that state and has no `terminalError`.
 
 The server retries a request only when the failure is temporary and a retry is safe, and it rejects responses larger than 8 MiB. It never includes the API key or the authorization header in errors that the client can see.
 
