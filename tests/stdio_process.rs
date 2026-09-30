@@ -34,8 +34,8 @@ use wait_timeout::ChildExt;
 struct VersionedClient(rmcp::model::ProtocolVersion);
 
 impl ClientHandler for VersionedClient {
-    fn get_info(&self) -> rmcp::model::ClientInfo {
-        let mut info = rmcp::model::ClientInfo::default();
+    fn get_info(&self) -> rmcp::model::ClientConfig {
+        let mut info = rmcp::model::ClientConfig::default();
         info.protocol_version = self.0.clone();
         info
     }

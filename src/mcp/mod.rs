@@ -6,7 +6,7 @@ use rmcp::{
     handler::server::router::tool::ToolRouter,
     model::{
         ExtensionCapabilities, Implementation, JsonObject, MetaObject, ServerCapabilities,
-        ServerInfo,
+        ServerConfig,
     },
 };
 
@@ -54,7 +54,7 @@ impl TiingoServer {
 #[rmcp::tool_handler(router = self.tool_router)]
 impl ServerHandler for TiingoServer {
     #[allow(deprecated)]
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut extensions = ExtensionCapabilities::new();
         extensions.insert("io.modelcontextprotocol/ui".to_owned(), JsonObject::new());
         let mut capabilities = ServerCapabilities::builder()
@@ -73,7 +73,7 @@ impl ServerHandler for TiingoServer {
             .as_mut()
             .expect("resources enabled")
             .subscribe = Some(false);
-        ServerInfo::new(capabilities)
+        ServerConfig::new(capabilities)
             .with_server_info(Implementation::new(
                 "Tiingo MCP Server",
                 env!("CARGO_PKG_VERSION"),
