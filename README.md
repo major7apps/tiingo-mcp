@@ -3,59 +3,100 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml)
 
-A native [Model Context Protocol](https://modelcontextprotocol.io) server for the [Tiingo](https://www.tiingo.com) financial data API. Version 2.1.0 exposes 38 tools across EOD, IEX, consolidated equity, BOATS, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, corporate actions, and bounded upstream market-data subscriptions, plus three fixed resources, one resource template, and five prompts.
+tiingo-mcp is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for the [Tiingo](https://www.tiingo.com) financial data API, and it's written in Rust. An MCP client, such as Claude Code or Claude Desktop, starts the server and calls its tools to fetch stock, forex, crypto, fund, news, and fundamentals data from Tiingo.
 
-The server uses MCP over stdio. Its finite subscription tools connect to upstream Tiingo WebSockets; MCP Streamable HTTP and WebSocket transports are not part of this server.
+Version 2.1.0 exposes 38 tools. The server also provides three fixed resources, one resource template, and five prompts. The tools cover these areas:
+
+- End of day (EOD) stock prices, intraday IEX prices, and consolidated and overnight (BOATS) equity prices
+- Forex, crypto, Crypto Yield, and mutual fund and ETF fees
+- Search, news, fundamentals, and corporate actions such as dividends and splits
+- Short, bounded subscriptions to Tiingo's live market data feeds
+
+The server talks to its MCP client over stdio, which means the client starts it as a child process and exchanges messages through standard input and output. The subscription tools open WebSocket connections to Tiingo, but the server itself does not offer an MCP WebSocket or Streamable HTTP transport.
 
 ## Installation
 
-Published 2.1.0 installers, MCPB bundles, and the crates.io package expose the 38-tool surface documented below.
+Published 2.1.0 installers, MCPB bundles, and the crates.io package expose the 38-tool surface documented below. You can install the server in four ways, and you only need one of them.
 
-### Release installer
+### Install script
 
-On macOS or Linux:
+The install script is the quickest option. It detects your platform, downloads the matching prebuilt binary from the GitHub release, and puts it in Cargo's binary directory, which is `~/.cargo/bin` unless you set `CARGO_HOME`. You don't need Rust installed to use it.
+
+On macOS or Linux, run:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.sh | sh
 ```
 
-On Windows PowerShell:
+On Windows, run this in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.ps1 | iex"
 ```
 
-The installers place `tiingo-mcp` in Cargo's binary directory. Ensure that directory is on `PATH` so MCP clients can use the command by name.
+Make sure the binary directory is on your `PATH`, so that MCP clients can start the server by the name `tiingo-mcp`.
+
+### Prebuilt binary
+
+You can download a prebuilt binary yourself if you'd rather not pipe a script into your shell. Each [GitHub release](https://github.com/major7apps/tiingo-mcp/releases/tag/v2.1.0) has one archive per platform, and each archive holds the `tiingo-mcp` binary with the README, changelog, and license.
+
+| Platform | Archive |
+|---|---|
+| macOS on Apple silicon | `tiingo-mcp-aarch64-apple-darwin.tar.xz` |
+| macOS on Intel | `tiingo-mcp-x86_64-apple-darwin.tar.xz` |
+| Linux on x86_64 | `tiingo-mcp-x86_64-unknown-linux-musl.tar.xz` |
+| Linux on ARM64 | `tiingo-mcp-aarch64-unknown-linux-musl.tar.xz` |
+| Windows on x86_64 | `tiingo-mcp-x86_64-pc-windows-msvc.zip` |
+
+The Linux binaries are statically linked, so they run on any distribution without extra libraries.
+
+On macOS or Linux, set `TARGET` to the name from the table and run these commands. They download the archive and its checksum, check the archive against the checksum, and copy the binary to `~/.local/bin`.
+
+```bash
+TARGET=aarch64-apple-darwin
+BASE=https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0
+
+curl -LO "$BASE/tiingo-mcp-$TARGET.tar.xz"
+curl -LO "$BASE/tiingo-mcp-$TARGET.tar.xz.sha256"
+shasum -a 256 -c "tiingo-mcp-$TARGET.tar.xz.sha256"
+
+tar -xJf "tiingo-mcp-$TARGET.tar.xz"
+mkdir -p ~/.local/bin
+install -m 755 "tiingo-mcp-$TARGET/tiingo-mcp" ~/.local/bin/
+~/.local/bin/tiingo-mcp --version
+```
+
+You can use `sha256sum -c` in place of `shasum -a 256 -c` on Linux. If `~/.local/bin` isn't on your `PATH`, add it, or copy the binary to another directory that is. If you download the archive with a web browser on macOS, macOS may block the binary the first time it runs. You can clear the block with `xattr -d com.apple.quarantine ~/.local/bin/tiingo-mcp`.
+
+On Windows, download `tiingo-mcp-x86_64-pc-windows-msvc.zip` and extract `tiingo-mcp.exe` to a folder such as `%LOCALAPPDATA%\Programs\tiingo-mcp`. Then add that folder to your user `PATH`, or put the full path to `tiingo-mcp.exe` in your MCP client's configuration. To check the download, compare the output of `Get-FileHash tiingo-mcp-x86_64-pc-windows-msvc.zip` with the value in the matching `.sha256` file.
+
+The release workflow also publishes GitHub build attestations. If you have the GitHub CLI, you can confirm that an archive was built by this repository's release workflow:
+
+```bash
+gh attestation verify "tiingo-mcp-$TARGET.tar.xz" -R major7apps/tiingo-mcp
+```
+
+### MCPB desktop bundle
+
+An MCPB bundle is a single file that a desktop MCP host, such as Claude Desktop, can install as an extension. Each release has one bundle per platform, named `tiingo-mcp-<target>.mcpb`, where `<target>` is one of the platform names in the table above. Download the bundle for your system, open it with your host's extension installer, and enter your Tiingo API key when the host asks for it. The bundle includes the binary and its MCP configuration, so you don't need to install the binary or set a path separately.
 
 ### Cargo
 
-With Rust 1.88 or newer installed, install the latest published release:
+If you have Rust 1.88 or newer, you can build and install the release from crates.io:
 
 ```bash
 cargo install tiingo-mcp --version 2.1.0 --locked
 ```
 
-To install the current development tree from a local checkout:
+To install the current development version from a local checkout, run:
 
 ```bash
 cargo install --path . --locked
 ```
 
-### MCPB desktop bundle
-
-Target-specific bundles are named `tiingo-mcp-<target>.mcpb`. Download a published bundle for your system, open it with an MCPB-compatible desktop host's extension installer, and enter your Tiingo API key when prompted. The bundle carries the binary and MCP configuration, so it does not require a separate executable path.
-
-Supported release targets:
-
-- `aarch64-apple-darwin`
-- `x86_64-apple-darwin`
-- `aarch64-unknown-linux-musl`
-- `x86_64-unknown-linux-musl`
-- `x86_64-pc-windows-msvc`
-
 ## MCP configuration
 
-Create an API key at [api.tiingo.com](https://api.tiingo.com). Endpoint access depends on the capabilities enabled for that key.
+You need a Tiingo API key, which you can create at [api.tiingo.com](https://api.tiingo.com). The data you can reach depends on the features enabled for your key, as described in [Access and quota](#access-and-quota).
 
 Add the server to your MCP client's configuration:
 
@@ -71,83 +112,85 @@ Add the server to your MCP client's configuration:
 }
 ```
 
-For Claude Code, the equivalent command is:
+If `tiingo-mcp` isn't on the `PATH` that your client sees, set `command` to the full path of the binary.
+
+In Claude Code, you can add the server with one command:
 
 ```bash
 claude mcp add tiingo --env TIINGO_API_KEY=your-api-key-here -- tiingo-mcp
 ```
 
-You can also launch the server directly:
+You can also start the server directly to check that it runs:
 
 ```bash
 TIINGO_API_KEY=your-api-key-here tiingo-mcp
 ```
 
-`tiingo-mcp` starts the stdio MCP server by default, writes protocol messages only to stdout, and sends diagnostics to stderr. It exits cleanly when stdin closes.
+The server writes only MCP protocol messages to stdout, and it writes diagnostic logs to stderr. It exits when stdin closes. You can control the log level with the `RUST_LOG` environment variable, e.g., `RUST_LOG=debug`.
 
 ## Tools
 
-Version 2.1.0 exposes this 38-tool surface. The original 17 tool names, required inputs, omission behavior, and results remain compatible; four optional `columns` fields are the only approved additions to those legacy descriptors.
+Version 2.1.0 keeps the 17 tools from earlier releases compatible. Their names, required inputs, default behavior, and results are unchanged, and the only additions are optional `columns` fields on four of them.
 
-### Stocks (EOD and lifecycle metadata)
-
-| Tool | Description |
-|---|---|
-| `get_stock_metadata` | Per-ticker name, exchange, description, and EOD date range |
-| `get_stock_prices` | Historical raw and adjusted EOD OHLCV, dividends, and splits |
-| `get_bulk_eod_prices` | Typed bulk CSV refresh with raw/adjusted fields and history-refresh tickers |
-| `get_ticker_metadata` | Selected vendor-supplied lifecycle/security-master columns |
-
-### IEX REST
+### Stocks (EOD and security metadata)
 
 | Tool | Description |
 |---|---|
-| `get_realtime_price` | Current per-ticker IEX snapshot |
-| `get_intraday_prices` | Per-ticker IEX intraday history and optional columns |
-| `get_iex_market_snapshot` | All-market IEX snapshot; use deliberately because the response can be large |
+| `get_stock_metadata` | Name, exchange, description, and EOD date range for one ticker |
+| `get_stock_prices` | Historical raw and adjusted EOD prices and volume, with dividends and splits |
+| `get_bulk_eod_prices` | The latest EOD prices for all tickers, with a list of tickers whose history needs a refresh |
+| `get_ticker_metadata` | Listing and security details supplied by Tiingo's data vendor |
 
-### Consolidated equity REST beta (4am–8pm ET)
-
-| Tool | Description |
-|---|---|
-| `get_equity_realtime_snapshot` | Consolidated ticker or all-market snapshot |
-| `get_equity_intraday_prices` | Consolidated intraday history with resampling, after-hours, fill, and column filters |
-
-### BOATS REST beta/add-on (8pm–3:59am ET)
+### IEX prices
 
 | Tool | Description |
 |---|---|
-| `get_boats_snapshot` | BOATS ticker or all-market snapshot |
-| `get_boats_prices` | BOATS intraday history with resampling, after-hours, and column filters |
+| `get_realtime_price` | Current IEX top of book price for one ticker, with optional after hours data |
+| `get_intraday_prices` | Intraday IEX price history for one ticker, with optional columns |
+| `get_iex_market_snapshot` | Current IEX snapshot for every ticker, which can be a large response |
+
+### Consolidated equity prices (beta, 4am to 8pm ET)
+
+| Tool | Description |
+|---|---|
+| `get_equity_realtime_snapshot` | Current consolidated snapshot for one ticker or for every ticker |
+| `get_equity_intraday_prices` | Consolidated intraday history, with options for interval, after hours data, gap filling, and columns |
+
+### Overnight BOATS prices (beta add-on, 8pm to 3:59am ET)
+
+| Tool | Description |
+|---|---|
+| `get_boats_snapshot` | Current BOATS snapshot for one ticker or for every ticker |
+| `get_boats_prices` | BOATS intraday history, with options for interval, after hours data, and columns |
 
 ### Funds
 
 | Tool | Description |
 |---|---|
-| `get_fund_metadata` | Mutual-fund or ETF fee metadata |
-| `get_fund_fee_metrics` | Current and historical mutual-fund or ETF fee metrics |
+| `get_fund_metadata` | Fee metadata for a mutual fund or ETF |
+| `get_fund_fee_metrics` | Current and historical fee metrics for a mutual fund or ETF |
 
-### Search early beta
+### Search (early beta)
 
 | Tool | Description |
 |---|---|
-| `search_tiingo_assets` | Bounded asset search by ticker or name |
+| `search_tiingo_assets` | Search for assets by ticker or name, with a limit on result count |
 
 ### Crypto Yield
 
 | Tool | Description |
 |---|---|
-| `get_crypto_yield_platforms` | Lending-platform list with optional platform filters |
-| `get_crypto_yield_pools` | Lending-pool metadata with pool/platform filters |
-| `get_crypto_yield_ticks` | Latest lending-pool metric ticks |
-| `get_crypto_yield_metrics` | Historical OHLC metrics for one lending pool |
+| `get_crypto_yield_platforms` | List of crypto lending platforms, with optional filters |
+| `get_crypto_yield_pools` | Metadata for lending pools, filtered by pool or platform |
+| `get_crypto_yield_ticks` | Latest metric values for lending pools |
+| `get_crypto_yield_metrics` | Historical Crypto Yield rate metrics for one lending pool |
 
-### Forex beta
+### Forex (beta)
 
 | Tool | Description |
 |---|---|
-| `get_forex_quote` | Current top-of-book rate for one pair |
-| `get_forex_quotes` | Batch top-of-book rates for 1–100 pairs |
+| `get_forex_quote` | Current best bid and ask for one currency pair |
+| `get_forex_quotes` | Current best bid and ask for 1 to 100 currency pairs |
 | `get_forex_prices` | Historical forex prices |
 
 ### Crypto
@@ -162,78 +205,91 @@ Version 2.1.0 exposes this 38-tool surface. The original 17 tool names, required
 
 | Tool | Description |
 |---|---|
-| `get_news` | Search financial articles by ticker, tag, source, or date |
+| `get_news` | Search financial news articles by ticker, tag, source, or date |
 
 ### Fundamentals
 
 | Tool | Description |
 |---|---|
-| `get_fundamentals_definitions` | Tiingo fundamental metric definitions |
-| `get_financial_statements` | Income statements, balance sheets, and cash-flow statements |
-| `get_daily_fundamentals` | Daily market and valuation metrics with optional columns |
-| `get_company_meta` | Company sector, industry, and location metadata with optional columns |
+| `get_fundamentals_definitions` | Definitions of Tiingo's fundamental metrics |
+| `get_financial_statements` | Income statements, balance sheets, and cash flow statements |
+| `get_daily_fundamentals` | Daily market and valuation metrics, with optional columns |
+| `get_company_meta` | Company sector, industry, and location, with optional columns |
 
 ### Corporate actions
 
 | Tool | Description |
 |---|---|
-| `get_distributions_by_ex_date` | Cross-ticker distributions for an optional exact ex-date, including announced events |
-| `get_dividends` | Per-ticker dividend and distribution history |
-| `get_dividend_yield` | Per-ticker dividend-yield history |
-| `get_splits` | Per-ticker split history |
-| `get_splits_by_ex_date` | Cross-ticker splits for an optional exact ex-date, including announced/cancelled events |
+| `get_distributions_by_ex_date` | Distributions across all tickers, optionally for one ex-date, including announced events |
+| `get_dividends` | Dividend and distribution history for one ticker |
+| `get_dividend_yield` | Dividend yield history for one ticker |
+| `get_splits` | Split history for one ticker |
+| `get_splits_by_ex_date` | Splits across all tickers, optionally for one ex-date, including announced and cancelled events |
 
-### Finite upstream market-data lifecycle
+### Live market data subscriptions
+
+The subscription tools let a client read live IEX or consolidated equity data for a limited time. First, the client starts a subscription. Second, it polls for new events, and it can add or remove symbols while the subscription is active. Third, it stops the subscription.
+
+Each subscription keeps every event it receives, and polling doesn't remove events, so one subscription can receive at most 2,048 events or 8 MiB in total. When the next event would pass either limit, the subscription closes with the state `data_gap`, so the client never loses events without knowing. To keep reading after that, start a new subscription. A subscription also closes after 30 minutes, or after five minutes with no calls from the client.
 
 | Tool | Description |
 |---|---|
-| `start_market_data_subscription` | Start one bounded IEX or consolidated-equity upstream subscription |
-| `poll_market_data_subscription` | Poll retained events by local arrival sequence with finite limits/wait; terminal sessions include a sanitized `terminalError` classification |
-| `update_market_data_subscription` | Add or remove explicit symbols on an active subscription; a partial failure reports the current `appliedSymbols` inventory |
-| `stop_market_data_subscription` | Idempotently unsubscribe, close, cancel, and join the worker |
+| `start_market_data_subscription` | Start one IEX or consolidated equity subscription with a size and time limit |
+| `poll_market_data_subscription` | Read new events after a sequence number, with a limit on count and wait time; the result's `state` shows whether the subscription is still open |
+| `update_market_data_subscription` | Add or remove symbols on an active subscription; if part of the update fails, the result lists the symbols that are active in `appliedSymbols` |
+| `stop_market_data_subscription` | Close the subscription and release its resources, and it's safe to call more than once |
 
-## EOD cache workflow
+## Keeping a local EOD price cache
 
-Seed each ticker's history from `/tiingo/daily/{ticker}/prices`. Refresh daily with bulk CSV `/tiingo/daily/prices`; the server returns typed JSON that keeps raw and adjusted OHLCV plus `splitFactor` and `divCash` separately named. If a refresh row has `splitFactor != 1` or `divCash > 0`, reseed that ticker's cached history so its adjusted series reflects the corporate action.
+You can keep a local copy of EOD price history with two tools. First, load each ticker's full history once with `get_stock_prices`. Second, call `get_bulk_eod_prices` each day to get the latest prices for all tickers. The bulk result keeps raw and adjusted prices in separate fields, with `splitFactor` and `divCash` for each row.
+
+A split or dividend changes a ticker's adjusted history. So if a row has `splitFactor` other than 1 or `divCash` greater than 0, reload that ticker's full history with `get_stock_prices`.
 
 ## Access and quota
 
-Access is determined by the capabilities attached to the caller's Tiingo key; this project does not promise access from a named plan. HTTP 401 means Tiingo rejected the credential. HTTP 403 means the credential is valid but the account is not entitled to the requested capability.
+Tiingo decides which data your key can reach, based on the features enabled for your account, and this project can't promise access based on a plan name. An HTTP 401 error means Tiingo rejected your API key. An HTTP 403 error means the key is valid, but your account doesn't include the data you asked for.
 
-- IEX upstream subscriptions default to derived-reference threshold 6. Levels 0 and 5 are accepted only when the caller explicitly confirms a direct IEX market-data agreement.
-- Consolidated equity is beta, operates 4am–8pm ET, and supports reference ticks at threshold 6 or liquidity/top-of-book-derived data at threshold 4.
-- BOATS REST is a separate beta/add-on for 8pm–3:59am ET. It is not combined with consolidated equity into a unified 24x5 endpoint.
-- Fund-fee data is restricted to enterprise/institutional access. Fundamentals and corporate actions are entitlement dependent.
-- Search is early beta. Crypto Yield is plan/entitlement dependent. `/tiingo/daily/meta` is vendor-supplied and availability dependent; a 404 does not imply another route.
+Some data has extra rules:
 
-Every live REST call consumes quota and bandwidth, and every live upstream subscription consumes bandwidth. Filter tickers and dates. Bulk and all-market operations are deterministic-test only by default, not routine smoke tests.
+- IEX subscriptions use data level 6 by default, which gives reference prices. You can request levels 0 or 5 only if you confirm that you have a direct market data agreement with IEX.
+- Consolidated equity data is in beta and covers 4am to 8pm ET. It supports reference ticks at level 6 or top of book data at level 4.
+- BOATS data is a separate beta add-on that covers 8pm to 3:59am ET. Tiingo doesn't combine it with consolidated equity data into one 24 hour feed.
+- Fund fee data needs enterprise or institutional access. Fundamentals, corporate actions, and Crypto Yield depend on your account's features, and Search is in early beta. The ticker metadata from `get_ticker_metadata` comes from a data vendor and may be missing, so a 404 error from it doesn't mean you should try a different endpoint.
+
+Every REST call uses API quota and bandwidth, and every live subscription uses bandwidth. To reduce use, request only the tickers and dates you need. The bulk and all ticker tools return large responses, so call them only when you need all of that data.
 
 ## Resources
 
-The server exposes static reference data without making Tiingo API calls.
+The server includes reference documents that clients can read without calling the Tiingo API.
 
 | Resource | Description |
 |----------|-------------|
-| `tiingo://capabilities` | Server capabilities and source-dated entitlement guidance |
-| `tiingo://fundamentals/definitions` | Curated reference for common fundamental metrics |
-| `tiingo://guide/date-formats` | Date formats, resample frequencies, sort options, and parameters |
-| `tiingo://guide/{asset_class}` | Guide template for stocks, market data, forex, crypto, Crypto Yield, funds, Search, news, fundamentals, and corporate actions |
+| `tiingo://capabilities` | Server capabilities and dated notes on which Tiingo features each tool needs |
+| `tiingo://fundamentals/definitions` | Definitions of common fundamental metrics |
+| `tiingo://guide/date-formats` | Date formats, resample intervals, sort options, and other parameters |
+| `tiingo://guide/{asset_class}` | A guide for one data area, e.g., stocks, forex, crypto, funds, news, or fundamentals |
 
 ## Prompts
 
 | Prompt | Arguments | Description |
 |--------|-----------|-------------|
-| `analyze-stock` | `ticker`, `include_news` | Comprehensive single-stock analysis |
-| `compare-stocks` | `ticker1`, `ticker2`, `period` | Side-by-side stock comparison |
-| `crypto-market-overview` | `tickers` | Crypto market snapshot with seven-day trends |
-| `earnings-report-analysis` | `ticker`, `earnings_date` | Earnings report, price-reaction, and news workflow |
-| `forex-pair-analysis` | `pair`, `period` | Currency-pair trend and volatility workflow |
+| `analyze-stock` | `ticker`, `include_news` | Full analysis of one stock |
+| `compare-stocks` | `ticker1`, `ticker2`, `period` | Comparison of two stocks |
+| `crypto-market-overview` | `tickers` | Crypto market summary with seven day trends |
+| `earnings-report-analysis` | `ticker`, `earnings_date` | Review of an earnings report, the price reaction, and related news |
+| `forex-pair-analysis` | `pair`, `period` | Trend and volatility review for a currency pair |
 
 ## Results and errors
 
-Successful tool calls return both a JSON text content block for older clients and MCP structured content. Recoverable failures are returned as MCP tool errors with a concise, sanitized JSON text block. A terminal WebSocket poll reports only `authentication`, `entitlement`, `transport`, or `protocol` in `terminalError`; it never retains Tiingo's raw rejection text. The client retries only safe transient failures, limits responses to 8 MiB, and never exposes the API key or authorization header in client-visible errors.
+Each successful tool call returns the result twice, once as JSON text for older clients and once as MCP structured content. When a call fails in a way the client can handle, the server returns an MCP tool error with a short JSON message, and it removes the API key and any sensitive details from that message.
+
+When a subscription fails, `poll_market_data_subscription` returns the state `failed` and reports one of four reasons in `terminalError`, which are `authentication`, `entitlement`, `transport`, or `protocol`. The server doesn't pass along Tiingo's original error text. A subscription that closes for another reason, such as `data_gap`, `expired`, or `stopped`, reports that state and has no `terminalError`.
+
+The server retries a request only when the failure is temporary and a retry is safe, and it rejects responses larger than 8 MiB. It never includes the API key or the authorization header in errors that the client can see.
 
 ## Development
+
+To build and check the project, clone the repository and run the same checks that CI runs:
 
 ```bash
 git clone https://github.com/major7apps/tiingo-mcp.git
@@ -247,7 +303,9 @@ cargo build --release --locked
 cargo deny check all
 ```
 
-The normal test suite uses local mock servers and does not need a Tiingo key. Ignored live-smoke tests require `TIINGO_API_KEY`, explicit authorization, and consume API quota or bandwidth. See [ARCHITECTURE.md](ARCHITECTURE.md), [API_SURFACE.md](API_SURFACE.md), and [QUALITY.md](QUALITY.md) for maintained engineering and evidence contracts.
+The normal test suite runs against local mock servers, so it doesn't need a Tiingo key. The live tests are marked as ignored, because they call the real Tiingo API and use quota or bandwidth. Run them only with explicit approval and a `TIINGO_API_KEY`.
+
+For more detail on how the project is built and tested, see [ARCHITECTURE.md](ARCHITECTURE.md), [API_SURFACE.md](API_SURFACE.md), and [QUALITY.md](QUALITY.md).
 
 ## License
 
@@ -257,5 +315,5 @@ The normal test suite uses local mock servers and does not need a Tiingo key. Ig
 
 - [Tiingo API documentation](https://www.tiingo.com/documentation/general/overview)
 - [Model Context Protocol](https://modelcontextprotocol.io)
-- [RMCP](https://github.com/modelcontextprotocol/rust-sdk)
+- [RMCP, the Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk)
 - [Source repository](https://github.com/major7apps/tiingo-mcp)
