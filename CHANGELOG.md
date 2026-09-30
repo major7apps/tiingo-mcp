@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Dependencies
+
+- Updated rustls from 0.23.43 to 0.23.45 to fix RUSTSEC-2026-0285, and replaced the yanked chacha20 0.10.1 with 0.10.2.
+- Updated rmcp from 3.1.4 to 3.5.0, and replaced the deprecated `ServerInfo` and `ClientInfo` aliases with `ServerConfig` and `ClientConfig`.
+- Updated clap, rand, reqwest, and thiserror, and updated all other dependencies to their latest versions that support Rust 1.88.
+
+### Documentation
+
+- Rewrote the README in plain language, and added steps to download, verify, and install the prebuilt release binaries. The install commands now download the latest release instead of a fixed version.
+
 ## 2.1.0 (2026-08-26)
 
 ### API surface

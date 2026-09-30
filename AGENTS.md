@@ -52,6 +52,6 @@ bash packaging/mcpb/package.sh <target-triple> <binary-directory>
 - Keep the version synchronized in `Cargo.toml`, the root `tiingo-mcp` entry in `Cargo.lock`, and `packaging/mcpb/manifest.json`.
 - Add the matching `CHANGELOG.md` section as `X.Y.Z (Unreleased)` while versioned release work accumulates. For this unversioned expansion, keep the top-level `Unreleased` section until a version is authorized.
 - Before creating a release tag, replace the versioned `Unreleased` marker with the release date.
-- Keep current-release URLs in `README.md` pointed at the latest published tag until its replacement exists.
+- Keep `README.md` install URLs on `releases/latest/download/` and out of version-pinned paths, so a release needs no README URL change.
 - Keep GitHub Release titles derived from the tag as bare `X.Y.Z`, with no supported namespace, date, or timestamp.
 - Run the [QUALITY.md](QUALITY.md) release gate plus `dist plan` and `cargo publish --dry-run --locked` before requesting release authorization.

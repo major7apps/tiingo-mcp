@@ -5,7 +5,7 @@
 
 tiingo-mcp is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for the [Tiingo](https://www.tiingo.com) financial data API, and it's written in Rust. An MCP client, such as Claude Code or Claude Desktop, starts the server and calls its tools to fetch stock, forex, crypto, fund, news, and fundamentals data from Tiingo.
 
-Version 2.1.0 exposes 38 tools. The server also provides three fixed resources, one resource template, and five prompts. The tools cover these areas:
+The server exposes 38 tools, and it also provides three fixed resources, one resource template, and five prompts. The tools cover these areas:
 
 - End of day (EOD) stock prices, intraday IEX prices, and consolidated and overnight (BOATS) equity prices
 - Forex, crypto, Crypto Yield, and mutual fund and ETF fees
@@ -16,7 +16,7 @@ The server talks to its MCP client over stdio, which means the client starts it 
 
 ## Installation
 
-Published 2.1.0 installers, MCPB bundles, and the crates.io package expose the 38-tool surface documented below. You can install the server in four ways, and you only need one of them.
+The release installers, MCPB bundles, and the crates.io package all install the same server with the 38 tools documented below. You can install the server in four ways, and you only need one of them. The commands below always install the latest release.
 
 ### Install script
 
@@ -25,20 +25,20 @@ The install script is the quickest option. It detects your platform, downloads t
 On macOS or Linux, run:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/major7apps/tiingo-mcp/releases/latest/download/tiingo-mcp-installer.sh | sh
 ```
 
 On Windows, run this in PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0/tiingo-mcp-installer.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/latest/download/tiingo-mcp-installer.ps1 | iex"
 ```
 
 Make sure the binary directory is on your `PATH`, so that MCP clients can start the server by the name `tiingo-mcp`.
 
 ### Prebuilt binary
 
-You can download a prebuilt binary yourself if you'd rather not pipe a script into your shell. Each [GitHub release](https://github.com/major7apps/tiingo-mcp/releases/tag/v2.1.0) has one archive per platform, and each archive holds the `tiingo-mcp` binary with the README, changelog, and license.
+You can download a prebuilt binary yourself if you'd rather not pipe a script into your shell. Each [GitHub release](https://github.com/major7apps/tiingo-mcp/releases/latest) has one archive per platform, and each archive holds the `tiingo-mcp` binary with the README, changelog, and license.
 
 | Platform | Archive |
 |---|---|
@@ -54,7 +54,7 @@ On macOS or Linux, set `TARGET` to the name from the table and run these command
 
 ```bash
 TARGET=aarch64-apple-darwin
-BASE=https://github.com/major7apps/tiingo-mcp/releases/download/v2.1.0
+BASE=https://github.com/major7apps/tiingo-mcp/releases/latest/download
 
 curl -LO "$BASE/tiingo-mcp-$TARGET.tar.xz"
 curl -LO "$BASE/tiingo-mcp-$TARGET.tar.xz.sha256"
@@ -82,10 +82,10 @@ An MCPB bundle is a single file that a desktop MCP host, such as Claude Desktop,
 
 ### Cargo
 
-If you have Rust 1.88 or newer, you can build and install the release from crates.io:
+If you have Rust 1.88 or newer, you can build and install the latest release from crates.io:
 
 ```bash
-cargo install tiingo-mcp --version 2.1.0 --locked
+cargo install tiingo-mcp --locked
 ```
 
 To install the current development version from a local checkout, run:
@@ -130,7 +130,7 @@ The server writes only MCP protocol messages to stdout, and it writes diagnostic
 
 ## Tools
 
-Version 2.1.0 keeps the 17 tools from earlier releases compatible. Their names, required inputs, default behavior, and results are unchanged, and the only additions are optional `columns` fields on four of them.
+The server keeps the 17 tools from releases before 2.1.0 compatible. Their names, required inputs, default behavior, and results are unchanged, and the only additions are optional `columns` fields on four of them.
 
 ### Stocks (EOD and security metadata)
 
