@@ -173,14 +173,14 @@ The server writes only MCP protocol messages to stdout, and it writes diagnostic
 
 ## Tools
 
-The server keeps the 17 tools from releases before 2.1.0 compatible. Their names, required inputs, default behavior, and results are unchanged, and the only additions are optional `columns` fields on four of them.
+The server keeps the 17 tools from releases before 2.1.0 compatible. Their names, required inputs, default behavior, and results are unchanged. Optional filters and ordering controls extend those inputs; [API_SURFACE.md](API_SURFACE.md#approved-rest-controls) lists the precise compatibility changes.
 
 ### Stocks (EOD and security metadata)
 
 | Tool | Description |
 |---|---|
 | `get_stock_metadata` | Name, exchange, description, and EOD date range for one ticker |
-| `get_stock_prices` | Historical raw and adjusted EOD prices and volume, with dividends and splits |
+| `get_stock_prices` | Historical raw and adjusted EOD prices and volume, with dividends, splits, optional columns and sorting |
 | `get_bulk_eod_prices` | The latest EOD prices for all tickers, with a list of tickers whose history needs a refresh |
 | `get_ticker_metadata` | Listing and security details supplied by Tiingo's data vendor |
 
@@ -189,22 +189,22 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 | Tool | Description |
 |---|---|
 | `get_realtime_price` | Current IEX top of book price for one ticker, with optional after hours data |
-| `get_intraday_prices` | Intraday IEX price history for one ticker, with optional columns |
-| `get_iex_market_snapshot` | Current IEX snapshot for every ticker, which can be a large response |
+| `get_intraday_prices` | Intraday IEX price history for one ticker, with columns, after hours and gap filling options |
+| `get_iex_market_snapshot` | Current IEX snapshot for 1–100 selected tickers, or every ticker when the filter is omitted |
 
 ### Consolidated equity prices (beta, 4am to 8pm ET)
 
 | Tool | Description |
 |---|---|
-| `get_equity_realtime_snapshot` | Current consolidated snapshot for one ticker or for every ticker |
+| `get_equity_realtime_snapshot` | Current consolidated snapshot for one ticker, 1–100 selected tickers, or every ticker |
 | `get_equity_intraday_prices` | Consolidated intraday history, with options for interval, after hours data, gap filling, and columns |
 
 ### Overnight BOATS prices (beta add-on, 8pm to 3:59am ET)
 
 | Tool | Description |
 |---|---|
-| `get_boats_snapshot` | Current BOATS snapshot for one ticker or for every ticker |
-| `get_boats_prices` | BOATS intraday history, with options for interval, after hours data, and columns |
+| `get_boats_snapshot` | Current BOATS snapshot for one ticker, 1–100 selected tickers, or every ticker |
+| `get_boats_prices` | BOATS overnight history, with interval, gap filling and columns; after hours flag preserves the overnight window |
 
 ### Mutual fund and ETF data
 
@@ -217,7 +217,7 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 
 | Tool | Description |
 |---|---|
-| `search_tiingo_assets` | Search for assets by ticker or name, with a limit on result count |
+| `search_tiingo_assets` | Search by ticker or name, with exact matches, delisted assets and a result limit of 1–100 |
 
 ### Crypto Yield
 
@@ -240,8 +240,8 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 
 | Tool | Description |
 |---|---|
-| `get_crypto_quote` | Current prices for one or more crypto tickers |
-| `get_crypto_prices` | Historical crypto prices |
+| `get_crypto_quote` | Current prices for one or more crypto tickers, with exchange and interval filters |
+| `get_crypto_prices` | Historical crypto prices, with exchange and interval filters |
 | `get_crypto_metadata` | Ticker metadata and supported exchanges |
 
 ### Financial news
@@ -255,8 +255,8 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 | Tool | Description |
 |---|---|
 | `get_fundamentals_definitions` | Definitions of Tiingo's fundamental metrics |
-| `get_financial_statements` | Income statements, balance sheets, and cash flow statements |
-| `get_daily_fundamentals` | Daily market and valuation metrics, with optional columns |
+| `get_financial_statements` | Income statements, balance sheets and cash flow statements, with as-reported filings and date sorting |
+| `get_daily_fundamentals` | Daily market and valuation metrics, with optional columns and sorting |
 | `get_company_meta` | Company sector, industry, and location, with optional columns |
 
 ### Corporate actions
@@ -273,7 +273,7 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 
 The subscription tools let a client read live IEX or consolidated equity data for a limited time. First, the client starts a subscription. Second, it polls for new events, and it can add or remove symbols while the subscription is active. Third, it stops the subscription.
 
-Each subscription keeps every event it receives, and polling doesn't remove events, so one subscription can receive at most 2,048 events or 8 MiB in total. When the next event would pass either limit, the subscription closes with the state `data_gap`, so the client never loses events without knowing. To keep reading after that, start a new subscription. A subscription also closes after 30 minutes, or after five minutes with no calls from the client.
+Each subscription keeps every event it receives, and polling doesn't remove events, so one subscription can receive at most 2,048 events or 8 MiB in total. When the next event would pass either limit, the subscription closes with the state `data_gap`, so the client never loses events without knowing. To keep reading after that, start a new subscription. A subscription also closes after 30 minutes, or after five minutes with no calls from the client. The start result reports the state at publication; check it before proceeding. A successful upstream acknowledgement does not prove that market events were delivered.
 
 | Tool | Description |
 |---|---|
@@ -281,6 +281,16 @@ Each subscription keeps every event it receives, and polling doesn't remove even
 | `poll_market_data_subscription` | Read new events after a sequence number, with a limit on count and wait time; the result's `state` shows whether the subscription is still open |
 | `update_market_data_subscription` | Add or remove symbols on an active subscription; if part of the update fails, the result lists the symbols that are active in `appliedSymbols` |
 | `stop_market_data_subscription` | Close the subscription and release its resources, and it's safe to call more than once |
+
+## REST request options
+
+Optional controls are omitted from the Tiingo request unless you supply them, so existing defaults remain unchanged. Use `columns` to narrow EOD output and `sort` to order EOD or daily fundamental rows; prefix a field with `-` for descending order. Financial statements accept only `sort="date"` or `sort="-date"`. Set `as_reported=true` to request filings as released with publication dates; omitted or false requests return the latest revisions with fiscal-period dates.
+
+Snapshot `tickers` accepts an array of 1–100 symbols. For consolidated equity and BOATS, choose either the existing single `ticker` or the new `tickers` array. Omitting both keeps the all-market behavior. Crypto `exchanges` accepts an array of exchange identifiers for current or historical prices. Search supports `exact_ticker_match`, `include_delisted`, and `limit` from 1 to 100.
+
+Intraday intervals accept positive whole-number minutes or hours, such as `45min` and `4hour`. IEX history uses those units only. Consolidated equity, BOATS and forex retain the existing `1day` input; Crypto and Crypto Yield also accept day multiples such as `2day`. EOD intervals remain `daily`, `weekly`, `monthly`, and `annually`.
+
+IEX history accepts `after_hours` and `force_fill`; BOATS history also accepts `force_fill`. Tiingo’s BOATS `after_hours` flag does not extend its 8pm–3:59am ET history window. See [the full request contract](API_SURFACE.md#approved-rest-controls) for query names, validation and exclusions.
 
 ## Keeping a local EOD price cache
 
@@ -291,6 +301,8 @@ A split or dividend changes a ticker's adjusted history. So if a row has `splitF
 ## Access and quota
 
 Tiingo decides which data your key can reach, based on the features enabled for your account, and this project can't promise access based on a plan name. An HTTP 401 error means Tiingo rejected your API key. An HTTP 403 error means the key is valid, but your account doesn't include the data you asked for.
+
+The access guidance below was reviewed against official documentation on **2026-10-04** (`sources_as_of`); it does not guarantee the features enabled for a particular account.
 
 Some data has extra rules:
 
@@ -328,7 +340,7 @@ Each successful tool call returns the result twice, once as JSON text for older 
 
 When a subscription fails, `poll_market_data_subscription` returns the state `failed` and reports one of four reasons in `terminalError`, which are `authentication`, `entitlement`, `transport`, or `protocol`. The server doesn't pass along Tiingo's original error text. A subscription that closes for another reason, such as `data_gap`, `expired`, or `stopped`, reports that state and has no `terminalError`.
 
-The server retries a request only when the failure is temporary and a retry is safe, and it rejects responses larger than 8 MiB. It never includes the API key or the authorization header in errors that the client can see.
+The server retries a request only when the failure is temporary and a retry is safe, and it rejects responses larger than 8 MiB. Malformed WebSocket frames and invalid UTF-8 terminate the subscription as a protocol failure; abrupt transport loss can reconnect. Error-body reading stops once its bounded diagnostic prefix is full. It never includes the API key or the authorization header in errors that the client can see.
 
 ## Development
 
@@ -346,7 +358,7 @@ cargo build --release --locked
 cargo deny check all
 ```
 
-The normal test suite runs against local mock servers, so it doesn't need a Tiingo key. The live tests are marked as ignored, because they call the real Tiingo API and use quota or bandwidth. Run them only with explicit approval and a `TIINGO_API_KEY`.
+The normal test suite runs against local mock servers, so it doesn't need a Tiingo key. The live tests are marked as ignored, because they call the real Tiingo API and use quota or bandwidth. Run them only with explicit approval and a `TIINGO_API_KEY`. Record data delivery, acknowledgement without data, entitlement denial, skipped operations and terminal failure separately. A passing entitlement-aware test does not mean every represented tool returned data. The [live inventory](API_SURFACE.md#checked-in-ignored-live-smokes) includes actual stdio cases for bounded REST and subscription updates; their presence does not establish live success.
 
 For more detail on how the project is built and tested, see [ARCHITECTURE.md](ARCHITECTURE.md), [API_SURFACE.md](API_SURFACE.md), and [QUALITY.md](QUALITY.md).
 

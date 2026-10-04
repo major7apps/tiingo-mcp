@@ -37,7 +37,10 @@ const CAPABILITY: &str = "WebSocket market data";
 const MAX_RETAINED_TERMINAL_SESSIONS: usize = MAX_WEBSOCKET_SESSIONS;
 
 #[cfg(test)]
-static POLL_RESULT_SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+std::thread_local! {
+    // Each unit test uses a current-thread runtime; parallel tests need isolated counts.
+    static POLL_RESULT_SERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 mod worker;
 
@@ -505,10 +508,11 @@ impl MarketDataRegistry {
                         "the WebSocket registry is shutting down".into(),
                     ));
                 }
+                let state = self.session(&session_id).await?.data.lock().await.status;
                 guard.armed = false;
                 Ok(StartResult {
                     id: session_id,
-                    state: SubscriptionStatus::Active,
+                    state,
                 })
             }
             Err(error) => {
@@ -810,7 +814,7 @@ async fn poll_snapshot(
 
 fn serialize_poll_result(result: &PollResult) -> Result<Vec<u8>, TiingoError> {
     #[cfg(test)]
-    POLL_RESULT_SERIALIZATIONS.fetch_add(1, Ordering::Relaxed);
+    POLL_RESULT_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     serde_json::to_vec(result).map_err(|_| TiingoError::WebSocketProtocol {
         reason: "poll response could not be encoded",
     })
@@ -907,6 +911,60 @@ mod tests {
     use crate::config::WEBSOCKET_ABSOLUTE_LIFETIME;
 
     use super::*;
+
+    #[tokio::test]
+    async fn start_reports_a_terminal_state_known_before_publication() {
+        use std::{future::Future, task::Poll};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            socket.next().await.unwrap().unwrap();
+            socket
+                .send(Message::text(
+                    r#"{"messageType":"I","data":{"subscriptionId":61},"response":{"code":200,"message":"Success"}}"#,
+                ))
+                .await
+                .unwrap();
+            socket
+                .send(Message::text(
+                    r#"{"messageType":"E","response":{"code":403,"message":"not entitled"}}"#,
+                ))
+                .await
+                .unwrap();
+            while let Some(message) = socket.next().await {
+                if matches!(message, Ok(Message::Close(_)) | Err(_)) {
+                    break;
+                }
+            }
+        });
+        let registry = MarketDataRegistry::with_connector(
+            Some("test-key".into()),
+            TiingoConnector::with_endpoints(&endpoint, &endpoint).unwrap(),
+        );
+        let mut start = Box::pin(registry.start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        }));
+        std::future::poll_fn(|context| match start.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("start must wait for an acknowledgement"),
+        })
+        .await;
+        server.await.unwrap();
+        let started = start.await.unwrap();
+        assert_eq!(started.state, SubscriptionStatus::Failed);
+        let terminal = registry.poll(&started.id, 0).await.unwrap();
+        assert_eq!(
+            terminal.terminal_error,
+            Some(TerminalErrorKind::Entitlement)
+        );
+        registry.shutdown().await;
+    }
 
     #[tokio::test]
     async fn partial_update_reports_applied_symbols_at_absolute_expiry() {
@@ -1083,7 +1141,7 @@ mod tests {
             terminal_order: AtomicU64::new(0),
         };
 
-        POLL_RESULT_SERIALIZATIONS.store(0, Ordering::Relaxed);
+        POLL_RESULT_SERIALIZATIONS.set(0);
         let page = poll_snapshot(
             "00000000000000000000000000000000",
             &session,
@@ -1095,7 +1153,7 @@ mod tests {
 
         assert_eq!(page.events.len(), MAX_WEBSOCKET_POLL_EVENTS);
         assert_eq!(
-            POLL_RESULT_SERIALIZATIONS.load(Ordering::Relaxed),
+            POLL_RESULT_SERIALIZATIONS.get(),
             1,
             "poll byte admission must not reserialize the growing result"
         );

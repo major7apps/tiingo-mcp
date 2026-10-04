@@ -127,7 +127,7 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         capabilities["tool_count"].as_u64(),
         Some(tools.len() as u64)
     );
-    assert_eq!(capabilities["as_of"], "2026-08-25");
+    assert_eq!(capabilities["as_of"], "2026-10-04");
     let capability_sources = capabilities["official_sources"].as_array().unwrap();
     for source in [
         "https://www.tiingo.com/documentation/general/overview",
@@ -157,7 +157,7 @@ async fn advertises_and_reads_corrected_legacy_resources() {
         assert_eq!(mime_type.as_deref(), Some("application/json"));
         let guide = json_text(&result);
         assert!(guide.is_object(), "{asset_class} must return JSON");
-        assert_eq!(guide["availability"]["as_of"], "2026-08-25");
+        assert_eq!(guide["availability"]["as_of"], "2026-10-04");
         assert!(
             guide["availability"]["official_sources"]
                 .as_array()

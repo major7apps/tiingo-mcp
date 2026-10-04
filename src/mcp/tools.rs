@@ -35,6 +35,10 @@ pub struct StockPricesArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub resample_freq: Option<EodResample>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+    #[serde(default)]
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -71,18 +75,26 @@ pub struct IntradayPricesArgs {
     pub resample_freq: Option<IexResample>,
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default)]
+    pub after_hours: Option<bool>,
+    #[serde(default)]
+    pub force_fill: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(extend("properties" = {}))]
-pub struct IexMarketSnapshotArgs {}
+pub struct IexMarketSnapshotArgs {
+    #[serde(default)]
+    pub tickers: Option<Vec<String>>,
+}
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EquityRealtimeSnapshotArgs {
     #[serde(default)]
     pub ticker: Option<String>,
+    #[serde(default)]
+    pub tickers: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -111,6 +123,8 @@ pub struct EquityIntradayPricesArgs {
 pub struct BoatsSnapshotArgs {
     #[serde(default)]
     pub ticker: Option<String>,
+    #[serde(default)]
+    pub tickers: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -130,6 +144,8 @@ pub struct BoatsPricesArgs {
     pub after_hours: Option<bool>,
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default)]
+    pub force_fill: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -148,6 +164,12 @@ pub struct FundFeeMetricsArgs {
 #[serde(deny_unknown_fields)]
 pub struct SearchTiingoAssetsArgs {
     pub query: String,
+    #[serde(default)]
+    pub exact_ticker_match: Option<bool>,
+    #[serde(default)]
+    pub include_delisted: Option<bool>,
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -222,6 +244,11 @@ pub struct ForexPricesArgs {
 pub struct CryptoQuoteArgs {
     #[serde(default)]
     pub tickers: Option<String>,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub resample_freq: Option<IntradayResample>,
+    #[serde(default)]
+    pub exchanges: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -237,6 +264,8 @@ pub struct CryptoPricesArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub resample_freq: Option<IntradayResample>,
+    #[serde(default)]
+    pub exchanges: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -287,6 +316,10 @@ pub struct FinancialStatementsArgs {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub end_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub as_reported: Option<bool>,
+    #[serde(default)]
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -301,6 +334,8 @@ pub struct DailyFundamentalsArgs {
     pub end_date: Option<chrono::NaiveDate>,
     #[serde(default)]
     pub columns: Option<Vec<String>>,
+    #[serde(default)]
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -535,10 +570,12 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_stock_prices(
+                .get_stock_prices_with_options(
                     &args.ticker,
                     range(args.start_date, args.end_date),
                     args.resample_freq,
+                    args.columns.as_deref(),
+                    args.sort.as_deref(),
                 )
                 .await,
         )
@@ -591,11 +628,13 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_intraday_prices(
+                .get_intraday_prices_with_options(
                     &args.ticker,
                     range(args.start_date, args.end_date),
                     args.resample_freq,
                     args.columns.as_deref(),
+                    args.after_hours,
+                    args.force_fill,
                 )
                 .await,
         )
@@ -607,9 +646,13 @@ impl TiingoServer {
     )]
     async fn get_iex_market_snapshot(
         &self,
-        Parameters(_args): Parameters<IexMarketSnapshotArgs>,
+        Parameters(args): Parameters<IexMarketSnapshotArgs>,
     ) -> CallToolResult {
-        tool_result(self.client.get_iex_market_snapshot().await)
+        tool_result(
+            self.client
+                .get_iex_market_snapshot_with_tickers(args.tickers.as_deref())
+                .await,
+        )
     }
 
     #[rmcp::tool(
@@ -622,7 +665,10 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_equity_realtime_snapshot(args.ticker.as_deref())
+                .get_equity_realtime_snapshot_with_tickers(
+                    args.ticker.as_deref(),
+                    args.tickers.as_deref(),
+                )
                 .await,
         )
     }
@@ -657,7 +703,11 @@ impl TiingoServer {
         &self,
         Parameters(args): Parameters<BoatsSnapshotArgs>,
     ) -> CallToolResult {
-        tool_result(self.client.get_boats_snapshot(args.ticker.as_deref()).await)
+        tool_result(
+            self.client
+                .get_boats_snapshot_with_tickers(args.ticker.as_deref(), args.tickers.as_deref())
+                .await,
+        )
     }
 
     #[rmcp::tool(
@@ -670,12 +720,13 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_boats_prices(
+                .get_boats_prices_with_options(
                     &args.ticker,
                     range(args.start_date, args.end_date),
                     args.resample_freq,
                     args.after_hours,
                     args.columns.as_deref(),
+                    args.force_fill,
                 )
                 .await,
         )
@@ -711,7 +762,16 @@ impl TiingoServer {
         &self,
         Parameters(args): Parameters<SearchTiingoAssetsArgs>,
     ) -> CallToolResult {
-        tool_result(self.client.search_tiingo_assets(&args.query).await)
+        tool_result(
+            self.client
+                .search_tiingo_assets_with_options(
+                    &args.query,
+                    args.exact_ticker_match,
+                    args.include_delisted,
+                    args.limit,
+                )
+                .await,
+        )
     }
 
     #[rmcp::tool(
@@ -827,7 +887,15 @@ impl TiingoServer {
         &self,
         Parameters(args): Parameters<CryptoQuoteArgs>,
     ) -> CallToolResult {
-        tool_result(self.client.get_crypto_quote(args.tickers.as_deref()).await)
+        tool_result(
+            self.client
+                .get_crypto_quote_with_options(
+                    args.tickers.as_deref(),
+                    args.resample_freq,
+                    args.exchanges.as_deref(),
+                )
+                .await,
+        )
     }
 
     #[rmcp::tool(
@@ -840,10 +908,11 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_crypto_prices(
+                .get_crypto_prices_with_options(
                     &args.tickers,
                     range(args.start_date, args.end_date),
                     args.resample_freq,
+                    args.exchanges.as_deref(),
                 )
                 .await,
         )
@@ -906,7 +975,12 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_financial_statements(&args.ticker, range(args.start_date, args.end_date))
+                .get_financial_statements_with_options(
+                    &args.ticker,
+                    range(args.start_date, args.end_date),
+                    args.as_reported,
+                    args.sort.as_deref(),
+                )
                 .await,
         )
     }
@@ -921,10 +995,11 @@ impl TiingoServer {
     ) -> CallToolResult {
         tool_result(
             self.client
-                .get_daily_fundamentals(
+                .get_daily_fundamentals_with_options(
                     &args.ticker,
                     range(args.start_date, args.end_date),
                     args.columns.as_deref(),
+                    args.sort.as_deref(),
                 )
                 .await,
         )

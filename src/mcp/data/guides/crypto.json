@@ -1,7 +1,7 @@
 {
   "asset_class": "crypto",
   "availability": {
-    "as_of": "2026-08-25",
+    "as_of": "2026-10-04",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/crypto"
@@ -28,5 +28,9 @@
     "Use get_crypto_prices for historical OHLCV data at various intraday or daily intervals.",
     "Pass comma-separated tickers to get_crypto_prices for multiple assets at once.",
     "Use the separate crypto-yield guide for lending platforms, pools, ticks, and metrics."
-  ]
+  ],
+  "request_controls": {
+    "prices": "get_crypto_quote and get_crypto_prices accept exchanges arrays of 1 to 100 identifiers, preserving exchange spelling and order.",
+    "intervals": "Both price tools accept resample_freq as a positive integer followed by min, hour, or day (for example 45min, 4hour, or 2day)."
+  }
 }

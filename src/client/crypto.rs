@@ -1,6 +1,6 @@
 use super::{
     TiingoClient,
-    query::{DateRange, IntradayResample},
+    query::{DateRange, IntradayResample, validate_exchange_list},
 };
 use crate::error::TiingoError;
 
@@ -16,12 +16,26 @@ impl TiingoClient {
         &self,
         tickers: Option<&str>,
     ) -> Result<serde_json::Value, TiingoError> {
-        self.get_json(
-            "current crypto prices",
-            "/tiingo/crypto/prices",
-            &tickers_query(tickers),
-        )
-        .await
+        self.get_crypto_quote_with_options(tickers, None, None)
+            .await
+    }
+
+    pub async fn get_crypto_quote_with_options(
+        &self,
+        tickers: Option<&str>,
+        resample: Option<IntradayResample>,
+        exchanges: Option<&[String]>,
+    ) -> Result<serde_json::Value, TiingoError> {
+        let mut query = tickers_query(tickers);
+        if let Some(value) = resample {
+            value.validate()?;
+            query.push(("resampleFreq", value.as_str().to_owned()));
+        }
+        if let Some(value) = validate_exchange_list(exchanges)? {
+            query.push(("exchanges", value));
+        }
+        self.get_json("current crypto prices", "/tiingo/crypto/prices", &query)
+            .await
     }
 
     pub async fn get_crypto_prices(
@@ -30,13 +44,28 @@ impl TiingoClient {
         range: DateRange,
         resample: Option<IntradayResample>,
     ) -> Result<serde_json::Value, TiingoError> {
+        self.get_crypto_prices_with_options(tickers, range, resample, None)
+            .await
+    }
+
+    pub async fn get_crypto_prices_with_options(
+        &self,
+        tickers: &str,
+        range: DateRange,
+        resample: Option<IntradayResample>,
+        exchanges: Option<&[String]>,
+    ) -> Result<serde_json::Value, TiingoError> {
         if tickers.is_empty() {
             return Err(TiingoError::Validation("tickers cannot be empty".into()));
         }
         let mut query = vec![("tickers", tickers.to_owned())];
         range.append(&mut query);
         if let Some(value) = resample {
+            value.validate()?;
             query.push(("resampleFreq", value.as_str().to_owned()));
+        }
+        if let Some(value) = validate_exchange_list(exchanges)? {
+            query.push(("exchanges", value));
         }
         self.get_json("crypto prices", "/tiingo/crypto/prices", &query)
             .await

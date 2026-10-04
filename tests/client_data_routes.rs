@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use tiingo_mcp::{
     client::{
         TiingoClient,
-        query::{DateRange, IntradayResample, NewsQuery, NewsSort},
+        query::{DateRange, IexResample, IntradayResample, NewsQuery, NewsSort},
     },
     config::{Config, RetryPolicy},
 };
@@ -329,7 +329,7 @@ async fn column_extensions_and_corporate_action_batches_use_exact_routes_and_que
         .get_dividend_yield(
             "AAPL",
             populated_range(),
-            Some(&["trailing12MoYield".to_owned()]),
+            Some(&["trailingDiv1Y".to_owned()]),
         )
         .await
         .unwrap();
@@ -365,7 +365,7 @@ async fn column_extensions_and_corporate_action_batches_use_exact_routes_and_que
             (
                 "/tiingo/corporate-actions/AAPL/distribution-yield".to_owned(),
                 vec![
-                    ("columns".to_owned(), "trailing12MoYield".to_owned()),
+                    ("columns".to_owned(), "trailingDiv1Y".to_owned()),
                     ("endDate".to_owned(), "2024-01-31".to_owned()),
                     ("startDate".to_owned(), "2024-01-01".to_owned()),
                 ],
@@ -691,6 +691,71 @@ async fn search_requires_a_trimmed_nonblank_bounded_query_before_requesting_tiin
             error,
             tiingo_mcp::error::TiingoError::Validation(_)
         ));
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn manually_constructed_invalid_resample_values_never_reach_tiingo() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+
+    for frequency in ["0min", "garbage"] {
+        for operation in [
+            "crypto quote",
+            "crypto prices",
+            "equity prices",
+            "BOATS prices",
+        ] {
+            let resample = Some(IntradayResample::Custom(frequency.into()));
+            let result = match operation {
+                "crypto quote" => {
+                    client
+                        .get_crypto_quote_with_options(Some("btcusd"), resample, None)
+                        .await
+                }
+                "crypto prices" => {
+                    client
+                        .get_crypto_prices("btcusd", DateRange::default(), resample)
+                        .await
+                }
+                "equity prices" => {
+                    client
+                        .get_equity_intraday_prices(
+                            "AAPL",
+                            DateRange::default(),
+                            resample,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                }
+                "BOATS prices" => {
+                    client
+                        .get_boats_prices("AAPL", DateRange::default(), resample, None, None)
+                        .await
+                }
+                _ => unreachable!(),
+            };
+            assert!(
+                matches!(result, Err(tiingo_mcp::error::TiingoError::Validation(_))),
+                "{operation}: {frequency}"
+            );
+        }
+        let result = client
+            .get_intraday_prices(
+                "AAPL",
+                DateRange::default(),
+                Some(IexResample::Custom(frequency.into())),
+                None,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(tiingo_mcp::error::TiingoError::Validation(_))),
+            "IEX prices: {frequency}"
+        );
     }
 
     assert!(server.received_requests().await.unwrap().is_empty());

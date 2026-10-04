@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "support/live_cases.rs"]
+mod live_cases;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -111,32 +115,6 @@ fn code_values(value: &str) -> BTreeSet<String> {
         remainder = &remainder[close + 1..];
     }
     values
-}
-
-fn ignored_test_names() -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for entry in fs::read_dir(repository_root().join("tests")).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_none_or(|extension| extension != "rs") {
-            continue;
-        }
-        let source = fs::read_to_string(&path).unwrap();
-        let mut awaiting_function = false;
-        for line in source.lines() {
-            let line = line.trim();
-            if line.starts_with("#[ignore") {
-                awaiting_function = true;
-            } else if awaiting_function
-                && let Some(function) = line
-                    .strip_prefix("async fn ")
-                    .or_else(|| line.strip_prefix("fn "))
-            {
-                names.insert(function.split('(').next().unwrap().to_owned());
-                awaiting_function = false;
-            }
-        }
-    }
-    names
 }
 
 fn assert_exact_tool_table(markdown: &str, discovered: &BTreeSet<String>, label: &str) {
@@ -303,87 +281,8 @@ async fn api_surface_uses_exact_rows_vocab_sources_and_live_inventory() {
             (row[0].trim_matches('`').to_owned(), code_values(&row[1]))
         })
         .collect::<BTreeMap<_, _>>();
-    let expected = BTreeMap::from([
-        (
-            "live_boats_single_ticker".to_owned(),
-            BTreeSet::from([
-                "get_boats_prices".to_owned(),
-                "get_boats_snapshot".to_owned(),
-            ]),
-        ),
-        (
-            "live_consolidated_equity_single_ticker".to_owned(),
-            BTreeSet::from([
-                "get_equity_intraday_prices".to_owned(),
-                "get_equity_realtime_snapshot".to_owned(),
-            ]),
-        ),
-        (
-            "live_consolidated_level_six_single_ticker_websocket".to_owned(),
-            BTreeSet::from([
-                "poll_market_data_subscription".to_owned(),
-                "start_market_data_subscription".to_owned(),
-                "stop_market_data_subscription".to_owned(),
-            ]),
-        ),
-        (
-            "live_crypto_yield_metrics_single_pool".to_owned(),
-            BTreeSet::from(["get_crypto_yield_metrics".to_owned()]),
-        ),
-        (
-            "live_distributions_by_ex_date_tiny_filter".to_owned(),
-            BTreeSet::from(["get_distributions_by_ex_date".to_owned()]),
-        ),
-        (
-            "live_forex_quotes_single_pair".to_owned(),
-            BTreeSet::from(["get_forex_quotes".to_owned()]),
-        ),
-        (
-            "live_fund_fees_single_ticker".to_owned(),
-            BTreeSet::from([
-                "get_fund_fee_metrics".to_owned(),
-                "get_fund_metadata".to_owned(),
-            ]),
-        ),
-        (
-            "live_iex_level_six_single_ticker_websocket".to_owned(),
-            BTreeSet::from([
-                "poll_market_data_subscription".to_owned(),
-                "start_market_data_subscription".to_owned(),
-                "stop_market_data_subscription".to_owned(),
-            ]),
-        ),
-        (
-            "live_mcp_eod_data_is_consistent_accurate_and_timely".to_owned(),
-            BTreeSet::from(["get_stock_prices".to_owned()]),
-        ),
-        (
-            "live_read_only_tiingo_capabilities".to_owned(),
-            BTreeSet::from([
-                "get_crypto_quote".to_owned(),
-                "get_dividends".to_owned(),
-                "get_forex_quote".to_owned(),
-                "get_fundamentals_definitions".to_owned(),
-                "get_news".to_owned(),
-                "get_stock_metadata".to_owned(),
-                "get_stock_prices".to_owned(),
-            ]),
-        ),
-        (
-            "live_search_early_beta".to_owned(),
-            BTreeSet::from(["search_tiingo_assets".to_owned()]),
-        ),
-        (
-            "live_splits_by_ex_date_tiny_filter".to_owned(),
-            BTreeSet::from(["get_splits_by_ex_date".to_owned()]),
-        ),
-    ]);
+    let expected = live_cases::live_inventory();
     assert_eq!(inventory, expected);
-    assert_eq!(
-        inventory.keys().cloned().collect::<BTreeSet<_>>(),
-        ignored_test_names(),
-        "API live inventory must match checked-in ignored tests"
-    );
     assert!(
         inventory
             .values()
@@ -494,14 +393,33 @@ fn root_project_reference_links_resolve_and_claude_uses_the_canonical_guide() {
     );
 
     assert!(
-        agents.contains("four approved optional `columns` additions"),
-        "AGENTS.md must state the exact backward-compatible legacy-tool delta"
+        agents.contains("Approved optional REST controls"),
+        "AGENTS.md must link the approved backward-compatible REST controls"
     );
     let api_surface = read_root_file("API_SURFACE.md");
     assert!(
-        api_surface.contains("four approved optional `columns` additions"),
-        "API_SURFACE.md must state the exact backward-compatible legacy-tool delta"
+        api_surface.contains("## Approved REST controls"),
+        "API_SURFACE.md must list the approved backward-compatible REST controls"
     );
+    for control in [
+        "columns",
+        "sort",
+        "as_reported",
+        "exact_ticker_match",
+        "include_delisted",
+        "limit",
+        "after_hours",
+        "force_fill",
+        "tickers",
+        "exchanges",
+        "resample_freq",
+    ] {
+        assert!(
+            api_surface.contains(&format!("`{control}`")),
+            "API_SURFACE.md omitted approved control {control}"
+        );
+    }
+    assert!(api_surface.contains("`sources_as_of: 2026-10-04`"));
 
     let architecture = read_root_file("ARCHITECTURE.md");
     assert!(

@@ -30,6 +30,7 @@ impl TiingoClient {
         let mut query = Vec::new();
         range.append(&mut query);
         if let Some(value) = resample {
+            value.validate_market_interval()?;
             query.push(("resampleFreq", value.as_str().to_owned()));
         }
         self.get_json(

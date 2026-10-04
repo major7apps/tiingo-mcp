@@ -9,7 +9,7 @@
     "search": "Early beta; response fields can change.",
     "ticker_lifecycle_metadata": "Vendor-supplied and availability dependent."
   },
-  "as_of": "2026-08-25",
+  "as_of": "2026-10-04",
   "asset_classes": {
     "corporate_actions": {
       "data_types": [

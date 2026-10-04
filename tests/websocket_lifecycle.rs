@@ -5136,15 +5136,20 @@ async fn aggregate_queue_byte_overflow_is_terminal_data_gap_without_reconnect() 
         .await
         .expect("subscription starts");
 
-    let terminal =
-        tokio::time::timeout(Duration::from_secs(2), registry.poll(&started.id, u64::MAX))
+    // Synchronize on overflow closing the socket, not debug-build JSON throughput.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(30), server)
             .await
-            .expect("byte overflow becomes terminal promptly")
-            .expect("terminal state remains inspectable");
+            .expect("byte overflow closes the socket")
+            .expect("mock server exits")
+    );
+    let terminal = registry
+        .poll_with_bounds(&started.id, u64::MAX, 1, Duration::ZERO)
+        .await
+        .expect("terminal state remains inspectable");
     assert_eq!(terminal.state, SubscriptionStatus::DataGap);
     assert!(terminal.events.is_empty());
     assert!(requested_delays.try_recv().is_err());
-    assert!(server.await.expect("mock server exits"));
     registry.shutdown().await;
 }
 
@@ -5523,4 +5528,148 @@ async fn reconnect_establishment_expires_at_session_deadline_before_ack_timeout(
     registry.shutdown().await;
     server.await.expect("mock server exits cleanly");
     assert_eq!(terminal.state, SubscriptionStatus::Expired);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MalformedWirePhase {
+    InitialAck,
+    Active,
+    UpdateAck,
+    RecoveryAck,
+}
+
+async fn assert_malformed_wire_is_terminal(frame: &'static [u8], phase: MalformedWirePhase) {
+    use tokio::io::AsyncWriteExt;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+    let (send_frame, frame_requested) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        if phase != MalformedWirePhase::InitialAck {
+            socket
+                .send(Message::text(
+                    r#"{"messageType":"I","data":{"subscriptionId":61},"response":{"code":200,"message":"Success"}}"#,
+                ))
+                .await
+                .unwrap();
+            frame_requested.await.unwrap();
+        }
+        if phase == MalformedWirePhase::UpdateAck {
+            socket.next().await.unwrap().unwrap();
+        }
+        if phase == MalformedWirePhase::RecoveryAck {
+            drop(socket); // Deliberate transport loss without a closing handshake.
+            let (stream, _) = listener.accept().await.unwrap();
+            socket = accept_async(stream).await.unwrap();
+            socket.next().await.unwrap().unwrap();
+        }
+        socket.get_mut().write_all(frame).await.unwrap();
+        while let Some(message) = socket.next().await {
+            if matches!(message, Ok(Message::Close(_)) | Err(_)) {
+                break;
+            }
+        }
+    });
+    let (delay_requests, mut requested_delays) = tokio::sync::mpsc::unbounded_channel();
+    let registry = MarketDataRegistry::with_connector_and_clocks(
+        Some("test-key".into()),
+        TiingoConnector::with_endpoints(&endpoint, &endpoint).unwrap(),
+        Arc::new(FixedClock(Utc::now())),
+        Arc::new(ManualReconnectClock {
+            requests: delay_requests,
+        }),
+    );
+    let result = registry
+        .start(StartRequest {
+            service: Service::Iex,
+            symbols: vec!["AAPL".into()],
+            threshold_level: None,
+            confirm_iex_market_data_agreement: false,
+        })
+        .await;
+    if phase == MalformedWirePhase::InitialAck {
+        assert_eq!(result.unwrap_err().payload().kind, "websocket_protocol");
+    } else {
+        let started = result.unwrap();
+        send_frame.send(()).unwrap();
+        if phase == MalformedWirePhase::UpdateAck {
+            let error = registry
+                .update(
+                    &started.id,
+                    UpdateRequest {
+                        add_symbols: vec!["MSFT".into()],
+                        remove_symbols: vec![],
+                        threshold_level: None,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.payload().kind, "websocket_protocol");
+        }
+        if phase == MalformedWirePhase::RecoveryAck {
+            let (delay, release) =
+                tokio::time::timeout(Duration::from_secs(1), requested_delays.recv())
+                    .await
+                    .expect("abrupt transport loss still schedules recovery")
+                    .unwrap();
+            assert_eq!(delay, Duration::from_millis(250));
+            release.send(()).unwrap();
+        }
+        let terminal =
+            tokio::time::timeout(Duration::from_secs(1), registry.poll(&started.id, u64::MAX))
+                .await
+                .expect("malformed wire data terminates instead of scheduling recovery")
+                .unwrap();
+        assert_eq!(terminal.state, SubscriptionStatus::Failed);
+        assert_eq!(terminal.terminal_error, Some(TerminalErrorKind::Protocol));
+    }
+    assert!(
+        requested_delays.try_recv().is_err(),
+        "protocol failure never retries"
+    );
+    registry.shutdown().await;
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_wire_opcode_during_initial_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x83, 0x00], MalformedWirePhase::InitialAck).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_opcode_during_active_receive_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x83, 0x00], MalformedWirePhase::Active).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_opcode_during_update_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x83, 0x00], MalformedWirePhase::UpdateAck).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_opcode_during_recovery_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x83, 0x00], MalformedWirePhase::RecoveryAck).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_utf8_during_initial_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x81, 0x01, 0xff], MalformedWirePhase::InitialAck).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_utf8_during_active_receive_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x81, 0x01, 0xff], MalformedWirePhase::Active).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_utf8_during_update_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x81, 0x01, 0xff], MalformedWirePhase::UpdateAck).await;
+}
+
+#[tokio::test]
+async fn malformed_wire_utf8_during_recovery_ack_is_terminal() {
+    assert_malformed_wire_is_terminal(&[0x81, 0x01, 0xff], MalformedWirePhase::RecoveryAck).await;
 }

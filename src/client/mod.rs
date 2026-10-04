@@ -264,15 +264,33 @@ async fn bounded_error_text(
     let max_bytes = max_chars.saturating_mul(4);
     let mut bytes = BytesMut::new();
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let Ok(chunk) = chunk else { break };
-        let remaining = max_bytes.saturating_sub(bytes.len());
-        if remaining == 0 {
+    let mut read_failed = false;
+    while bytes.len() < max_bytes {
+        let Some(chunk) = stream.next().await else {
             break;
-        }
+        };
+        let Ok(chunk) = chunk else {
+            read_failed = true;
+            break;
+        };
+        let remaining = max_bytes.saturating_sub(bytes.len());
         bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
     }
-    let text = String::from_utf8_lossy(&bytes).replace(api_key, "[REDACTED]");
+    // A byte cap or interrupted body can split an echoed credential.
+    let redacted_suffix = if bytes.len() == max_bytes || read_failed {
+        (1..=api_key.len().min(bytes.len()))
+            .rev()
+            .find(|&end| bytes.ends_with(&api_key.as_bytes()[..end]))
+    } else {
+        None
+    };
+    if let Some(prefix_len) = redacted_suffix {
+        bytes.truncate(bytes.len() - prefix_len);
+    }
+    let mut text = String::from_utf8_lossy(&bytes).replace(api_key, "[REDACTED]");
+    if redacted_suffix.is_some() {
+        text.push_str("[REDACTED]");
+    }
     sanitize_detail(&text, max_chars)
 }
 

@@ -52,7 +52,11 @@ fn intraday_prices_rejects_daily_resample() {
     }))
     .unwrap_err();
 
-    assert!(error.to_string().contains("unknown variant"));
+    assert!(
+        error
+            .to_string()
+            .contains("positive integer followed by min or hour")
+    );
 }
 
 fn test_client(server: &MockServer, api_key: &str) -> TiingoClient {
@@ -395,9 +399,16 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_stock_prices",
-        properties: &["ticker", "start_date", "end_date", "resample_freq"],
+        properties: &[
+            "ticker",
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "columns",
+            "sort",
+        ],
         required: &["ticker"],
-        optional: &["start_date", "end_date", "resample_freq"],
+        optional: &["start_date", "end_date", "resample_freq", "columns", "sort"],
     },
     ExpectedToolSchema {
         name: "get_realtime_price",
@@ -413,9 +424,18 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
             "end_date",
             "resample_freq",
             "columns",
+            "after_hours",
+            "force_fill",
         ],
         required: &["ticker"],
-        optional: &["start_date", "end_date", "resample_freq", "columns"],
+        optional: &[
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "columns",
+            "after_hours",
+            "force_fill",
+        ],
     },
     ExpectedToolSchema {
         name: "get_forex_quote",
@@ -431,15 +451,21 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_crypto_quote",
-        properties: &["tickers"],
+        properties: &["tickers", "exchanges", "resample_freq"],
         required: &[],
-        optional: &["tickers"],
+        optional: &["tickers", "exchanges", "resample_freq"],
     },
     ExpectedToolSchema {
         name: "get_crypto_prices",
-        properties: &["tickers", "start_date", "end_date", "resample_freq"],
+        properties: &[
+            "tickers",
+            "start_date",
+            "end_date",
+            "resample_freq",
+            "exchanges",
+        ],
         required: &["tickers"],
-        optional: &["start_date", "end_date", "resample_freq"],
+        optional: &["start_date", "end_date", "resample_freq", "exchanges"],
     },
     ExpectedToolSchema {
         name: "get_crypto_metadata",
@@ -479,15 +505,15 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_financial_statements",
-        properties: &["ticker", "start_date", "end_date"],
+        properties: &["ticker", "start_date", "end_date", "as_reported", "sort"],
         required: &["ticker"],
-        optional: &["start_date", "end_date"],
+        optional: &["start_date", "end_date", "as_reported", "sort"],
     },
     ExpectedToolSchema {
         name: "get_daily_fundamentals",
-        properties: &["ticker", "start_date", "end_date", "columns"],
+        properties: &["ticker", "start_date", "end_date", "columns", "sort"],
         required: &["ticker"],
-        optional: &["start_date", "end_date", "columns"],
+        optional: &["start_date", "end_date", "columns", "sort"],
     },
     ExpectedToolSchema {
         name: "get_company_meta",
@@ -515,9 +541,9 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_iex_market_snapshot",
-        properties: &[],
+        properties: &["tickers"],
         required: &[],
-        optional: &[],
+        optional: &["tickers"],
     },
     ExpectedToolSchema {
         name: "get_forex_quotes",
@@ -539,9 +565,9 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_equity_realtime_snapshot",
-        properties: &["ticker"],
+        properties: &["ticker", "tickers"],
         required: &[],
-        optional: &["ticker"],
+        optional: &["ticker", "tickers"],
     },
     ExpectedToolSchema {
         name: "get_equity_intraday_prices",
@@ -566,9 +592,9 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "get_boats_snapshot",
-        properties: &["ticker"],
+        properties: &["ticker", "tickers"],
         required: &[],
-        optional: &["ticker"],
+        optional: &["ticker", "tickers"],
     },
     ExpectedToolSchema {
         name: "get_boats_prices",
@@ -579,6 +605,7 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
             "resample_freq",
             "after_hours",
             "columns",
+            "force_fill",
         ],
         required: &["ticker"],
         optional: &[
@@ -587,6 +614,7 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
             "resample_freq",
             "after_hours",
             "columns",
+            "force_fill",
         ],
     },
     ExpectedToolSchema {
@@ -603,9 +631,9 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
     },
     ExpectedToolSchema {
         name: "search_tiingo_assets",
-        properties: &["query"],
+        properties: &["query", "exact_ticker_match", "include_delisted", "limit"],
         required: &["query"],
-        optional: &[],
+        optional: &["exact_ticker_match", "include_delisted", "limit"],
     },
     ExpectedToolSchema {
         name: "get_crypto_yield_platforms",
@@ -861,6 +889,12 @@ async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() 
 
 #[tokio::test]
 async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
+    for (service, wire_service) in [("iex", "iex"), ("consolidated", "cons")] {
+        assert_websocket_lifecycle_through_mcp(service, wire_service).await;
+    }
+}
+
+async fn assert_websocket_lifecycle_through_mcp(service: &'static str, wire_service: &'static str) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("ws://{}", listener.local_addr().unwrap());
     let websocket = tokio::spawn(async move {
@@ -895,7 +929,7 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
                 .send(Message::text(
                     serde_json::json!({
                         "messageType": "A",
-                        "service": "iex",
+                        "service": wire_service,
                         "data": [timestamp, "AAPL", price]
                     })
                     .to_string(),
@@ -971,7 +1005,7 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
         .call_tool(
             CallToolRequestParams::new("start_market_data_subscription").with_arguments(arguments(
                 serde_json::json!({
-                    "service": "iex",
+                    "service": service,
                     "symbols": ["aapl", "SPY"]
                 }),
             )),
@@ -1011,7 +1045,7 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
         polled["events"][0]["payload"],
         serde_json::json!({
             "messageType": "A",
-            "service": "iex",
+            "service": wire_service,
             "data": ["2026-08-25T14:00:00Z", "AAPL", 101.0]
         })
     );
@@ -1845,7 +1879,7 @@ async fn legacy_column_extensions_preserve_json_text_and_structured_data() {
         ("/tiingo/fundamentals/meta", "ticker,sector"),
         (
             "/tiingo/corporate-actions/AAPL/distribution-yield",
-            "trailing12MoYield",
+            "trailingDiv1Y",
         ),
     ] {
         Mock::given(method("GET"))
@@ -1873,7 +1907,7 @@ async fn legacy_column_extensions_preserve_json_text_and_structured_data() {
         ),
         (
             "get_dividend_yield",
-            serde_json::json!({"ticker": "AAPL", "columns": ["trailing12MoYield"]}),
+            serde_json::json!({"ticker": "AAPL", "columns": ["trailingDiv1Y"]}),
         ),
     ] {
         let result = connection
@@ -2306,6 +2340,7 @@ async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result
     };
     let mut latencies = Vec::with_capacity(SAMPLES);
     let mut row_counts = Vec::with_capacity(SAMPLES);
+    let mut first_data = None;
     for _ in 0..SAMPLES {
         let started = Instant::now();
         let result = tokio::time::timeout(
@@ -2328,9 +2363,26 @@ async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result
         let rows = structured["data"]
             .as_array()
             .context("live MCP EOD data was not an array")?;
-        anyhow::ensure!(!rows.is_empty(), "live MCP EOD response was empty");
+        anyhow::ensure!(
+            rows.len() == 1,
+            "live MCP EOD response must contain exactly the requested trading date"
+        );
+        if let Some(first) = &first_data {
+            anyhow::ensure!(
+                first == &structured["data"],
+                "historical EOD data changed across repeated samples"
+            );
+        } else {
+            first_data = Some(structured["data"].clone());
+        }
         row_counts.push(rows.len());
         for row in rows {
+            anyhow::ensure!(
+                row["date"]
+                    .as_str()
+                    .is_some_and(|date| date.starts_with("2024-01-02T")),
+                "unexpected trading date"
+            );
             let open = row["open"].as_f64().context("open was not numeric")?;
             let high = row["high"].as_f64().context("high was not numeric")?;
             let low = row["low"].as_f64().context("low was not numeric")?;
@@ -2339,7 +2391,6 @@ async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result
             anyhow::ensure!(low <= open && low <= close && low <= high);
             anyhow::ensure!(row["volume"].as_u64().is_some(), "volume was not unsigned");
             for field in [
-                "date",
                 "adjOpen",
                 "adjHigh",
                 "adjLow",
@@ -2348,7 +2399,12 @@ async fn live_mcp_eod_data_is_consistent_accurate_and_timely() -> anyhow::Result
                 "divCash",
                 "splitFactor",
             ] {
-                anyhow::ensure!(!row[field].is_null(), "{field} was missing");
+                anyhow::ensure!(
+                    row[field]
+                        .as_f64()
+                        .is_some_and(|value| value.is_finite() && value >= 0.0),
+                    "{field} was not a finite nonnegative number"
+                );
             }
         }
 

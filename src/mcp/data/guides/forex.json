@@ -1,7 +1,7 @@
 {
   "asset_class": "forex",
   "availability": {
-    "as_of": "2026-08-25",
+    "as_of": "2026-10-04",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/forex"
@@ -24,5 +24,8 @@
     "Use get_forex_quote for the current top-of-book bid/ask for a pair.",
     "Use get_forex_quotes for a bounded batch of one to 100 currency pairs.",
     "Use get_forex_prices for historical OHLCV data; supports 1min to 1day resampling."
-  ]
+  ],
+  "request_controls": {
+    "intervals": "get_forex_prices accepts custom positive integer min or hour intervals; existing 1day remains supported."
+  }
 }

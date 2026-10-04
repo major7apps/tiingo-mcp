@@ -1,7 +1,7 @@
 {
   "asset_class": "stocks",
   "availability": {
-    "as_of": "2026-08-25",
+    "as_of": "2026-10-04",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/end-of-day",
@@ -13,7 +13,7 @@
     "statement": "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability."
   },
   "common_pitfalls": [
-    "Ticker symbols are case-sensitive in the URL -- always uppercase.",
+    "Tiingo may return stock tickers in lowercase; compare ticker identities without regard to ASCII case.",
     "Intraday data is limited to recent history; check metadata for available date range.",
     "get_realtime_price may return stale data outside market hours unless after_hours=True.",
     "The vendor-supplied /tiingo/daily/meta route is availability-dependent and requires an explicit columns list.",
@@ -42,5 +42,11 @@
     "Use get_realtime_price for current IEX top-of-book price during market hours.",
     "Use get_intraday_prices for sub-daily IEX data at 1min, 5min, 15min, 30min, or 1hour intervals.",
     "Use ticker-filtered consolidated or BOATS tools before considering their large all-market snapshots."
-  ]
+  ],
+  "request_controls": {
+    "eod": "get_stock_prices accepts columns and sort (a field name, prefixed with - for descending).",
+    "iex_history": "get_intraday_prices accepts after_hours and force_fill; resample_freq accepts positive integer min or hour intervals such as 45min or 4hour.",
+    "snapshots": "get_iex_market_snapshot, get_equity_realtime_snapshot, and get_boats_snapshot accept tickers arrays of 1 to 100 symbols. Supply ticker or tickers, never both; omitting both preserves the all-market request.",
+    "boats_history": "get_boats_prices accepts force_fill. Consolidated and BOATS history accept custom positive integer intervals; existing 1day remains supported."
+  }
 }

@@ -11,7 +11,7 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
     time::{Instant, sleep_until, timeout},
 };
-use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
+use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message, error::ProtocolError};
 
 use crate::{
     config::{
@@ -307,12 +307,18 @@ pub(super) async fn run_worker(
                         bounded_close_socket(&mut socket).await;
                         return;
                     }
-                    Some(Err(WebSocketError::Capacity(_))) => {
-                        set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
-                        bounded_close_socket(&mut socket).await;
-                        return;
+                    Some(Err(error)) => {
+                        if matches!(
+                            map_socket_receive_error(error),
+                            TiingoError::WebSocketProtocol { .. }
+                        ) {
+                            set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
+                            bounded_close_socket(&mut socket).await;
+                            return;
+                        }
+                        true
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => true,
+                    Some(Ok(Message::Close(_))) | None => true,
                     _ => false,
                 }
             }
@@ -983,6 +989,14 @@ fn map_socket_receive_error(error: WebSocketError) -> TiingoError {
     match error {
         WebSocketError::Capacity(_) => TiingoError::WebSocketProtocol {
             reason: "WebSocket message exceeded the configured size limit",
+        },
+        WebSocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake) => {
+            TiingoError::Transport {
+                capability: CAPABILITY,
+            }
+        }
+        WebSocketError::Protocol(_) | WebSocketError::Utf8(_) => TiingoError::WebSocketProtocol {
+            reason: "WebSocket message was malformed",
         },
         _ => TiingoError::Transport {
             capability: CAPABILITY,
