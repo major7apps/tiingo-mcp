@@ -21,6 +21,8 @@ The release workflow contains custom MCPB packaging, upload steps, and restricte
 
 Homebrew publication is optional and requires setup outside this repository. Generating a formula does not make the Homebrew install command available.
 
+Release notes include the Homebrew command only after the tap publication succeeds or confirms the formula is already current. Skipped or failed publication leaves those instructions out.
+
 1. Create and initialize `major7apps/homebrew-tap` as a public GitHub repository.
 2. Add `HOMEBREW_TAP_TOKEN` as an Actions secret in `major7apps/tiingo-mcp`. Use a token with permission to write contents only in the tap repository.
 3. Set the Actions variable `HOMEBREW_TAP_ENABLED` to `true` after the repository and token are ready.
