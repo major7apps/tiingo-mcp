@@ -78,6 +78,8 @@ jobs:
   native-artifact:
     name: Native artifact (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.88.0
     strategy:
       fail-fast: false
       matrix:
@@ -114,31 +116,91 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install Zig 0.14.1
+      - name: Install native musl build tools
         if: runner.os == 'Linux'
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.14.1
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          compiler_target="${{ matrix.target }}"
+          compiler_target="${compiler_target//-/_}"
+          echo "CC_${compiler_target}=musl-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_${compiler_target^^}_LINKER=musl-gcc" >> "$GITHUB_ENV"
 
-      - name: Install cargo-zigbuild 0.23.2
-        if: runner.os == 'Linux'
-        run: cargo install cargo-zigbuild --version 0.23.2 --locked
+      - name: Install cargo-dist 0.32.0 on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
 
-      - name: Build Linux artifact
-        if: runner.os == 'Linux'
-        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+      - name: Install cargo-dist 0.32.0 on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: irm https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.ps1 | iex
 
-      - name: Build native artifact
-        if: runner.os != 'Linux'
-        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Locate WiX 3
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wixBin = Join-Path $env:WIX 'bin'
+          if (!(Test-Path (Join-Path $wixBin 'candle.exe'))) { throw 'WiX 3 candle.exe is required to build the MSI' }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build fresh release archives and installers
+        shell: bash
+        run: dist build --artifacts=all --target ${{ matrix.target }}
 
       - name: Run version check
         shell: bash
-        run: target/${{ matrix.target }}/release/${{ matrix.executable }} --version
+        run: target/${{ matrix.target }}/dist/${{ matrix.executable }} --version
+
+      - name: Install from the generated Homebrew formula
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          brew tap-new --no-git major7apps/installer-smoke
+          formula="$(brew --repository major7apps/installer-smoke)/Formula/tiingo-mcp.rb"
+          sed "s|https://github.com/major7apps/tiingo-mcp/releases/download/[^/]*/|file://$PWD/target/distrib/|g" target/distrib/tiingo-mcp.rb > "$formula"
+          brew install --formula major7apps/installer-smoke/tiingo-mcp
+          installed="$(brew --prefix major7apps/installer-smoke/tiingo-mcp)/bin/tiingo-mcp"
+          cmp "$installed" target/${{ matrix.target }}/dist/tiingo-mcp
+          echo "TIINGO_MCP_TEST_BINARY=$installed" >> "$GITHUB_ENV"
+
+      - name: Install from the generated shell installer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          TIINGO_MCP_DOWNLOAD_URL="file://$PWD/target/distrib" TIINGO_MCP_UNMANAGED_INSTALL="$RUNNER_TEMP/tiingo-install" sh target/distrib/tiingo-mcp-installer.sh
+          cmp "$RUNNER_TEMP/tiingo-install/tiingo-mcp" target/${{ matrix.target }}/dist/tiingo-mcp
+          echo "TIINGO_MCP_TEST_BINARY=$RUNNER_TEMP/tiingo-install/tiingo-mcp" >> "$GITHUB_ENV"
+
+      - name: Install the generated MSI
+        id: install-msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path 'target/distrib/tiingo-mcp-x86_64-pc-windows-msvc.msi').Path
+          $destination = Join-Path $env:RUNNER_TEMP 'tiingo-install'
+          $log = Join-Path $env:RUNNER_TEMP 'tiingo-install.log'
+          $install = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart APPLICATIONFOLDER=`"$destination`" /l*v `"$log`"" -Wait -PassThru
+          if ($install.ExitCode -notin @(0, 3010)) { Get-Content $log; throw "MSI installation failed: $($install.ExitCode)" }
+          'installed=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $installed = Join-Path $destination 'bin/tiingo-mcp.exe'
+          if ((Get-FileHash $installed).Hash -ne (Get-FileHash 'target/x86_64-pc-windows-msvc/dist/tiingo-mcp.exe').Hash) { throw 'MSI installed a different binary' }
+          if ((Get-FileHash (Join-Path $destination 'LICENSE')).Hash -ne (Get-FileHash 'LICENSE').Hash) { throw 'MSI did not install the project license' }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | ForEach-Object { $_.TrimEnd('\') }
+          if ($machinePath -notcontains (Join-Path $destination 'bin')) { throw 'MSI did not add its bin directory to the machine PATH' }
+          "TIINGO_MCP_TEST_BINARY=$installed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify executable version and MCP stdio discovery
+        run: cargo test --test stdio_process --locked
 
       - name: Build MCPB 0.3 bundle
         shell: bash
-        run: bash packaging/mcpb/package.sh ${{ matrix.target }} target/${{ matrix.target }}/release
+        run: bash packaging/mcpb/package.sh ${{ matrix.target }} target/${{ matrix.target }}/dist
 
       - name: Validate staged MCPB manifest with CLI 2.1.2
         shell: bash
@@ -152,15 +214,24 @@ jobs:
         shell: bash
         run: npx --yes @anthropic-ai/mcpb@2.1.2 info target/distrib/tiingo-mcp-${{ matrix.target }}.mcpb
 
-      - name: Archive native binary
-        shell: bash
-        run: tar -czf target/distrib/tiingo-mcp-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ${{ matrix.executable }}
-
-      - name: Upload native archive and MCPB bundle
+      - name: Upload native release artifacts and MCPB bundle
         uses: actions/upload-artifact@v7
         with:
           name: tiingo-mcp-${{ matrix.target }}
           path: |
-            target/distrib/tiingo-mcp-${{ matrix.target }}.tar.gz
+            target/distrib/tiingo-mcp-${{ matrix.target }}.*
             target/distrib/tiingo-mcp-${{ matrix.target }}.mcpb
+            target/distrib/tiingo-mcp.rb
+            target/distrib/tiingo-mcp-installer.*
           if-no-files-found: error
+
+      - name: Uninstall the MSI
+        if: always() && runner.os == 'Windows' && steps.install-msi.outputs.installed == 'true'
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path 'target/distrib/tiingo-mcp-x86_64-pc-windows-msvc.msi').Path
+          $uninstall = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
+          if ($uninstall.ExitCode -notin @(0, 3010)) { throw "MSI uninstall failed: $($uninstall.ExitCode)" }
+          if (Test-Path (Join-Path $env:RUNNER_TEMP 'tiingo-install/bin/tiingo-mcp.exe')) { throw 'MSI uninstall left the executable installed' }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | ForEach-Object { $_.TrimEnd('\') }
+          if ($machinePath -contains (Join-Path $env:RUNNER_TEMP 'tiingo-install/bin')) { throw 'MSI uninstall left its machine PATH entry' }

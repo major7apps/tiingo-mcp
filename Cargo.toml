@@ -3,10 +3,12 @@ name = "tiingo-mcp"
 version = "2.1.1"
 edition = "2024"
 rust-version = "1.88"
-description = "MCP server for the Tiingo financial data API"
+description = "Tiingo MCP server for stock market data, forex, crypto, news, and fundamentals"
 license = "MIT"
+authors = ["Major 7 Apps"]
+homepage = "https://github.com/major7apps/tiingo-mcp"
 repository = "https://github.com/major7apps/tiingo-mcp"
-keywords = ["mcp", "tiingo", "finance", "market-data"]
+keywords = ["mcp", "tiingo", "finance", "market-data", "stock-market"]
 categories = ["command-line-utilities", "api-bindings"]
 include = [
   "/src/**/*.rs",
@@ -17,6 +19,12 @@ include = [
   "/CHANGELOG.md",
   "/LICENSE",
 ]
+
+[package.metadata.wix]
+upgrade-guid = "18C7430E-C250-424A-BF8D-9EFFD8305628"
+path-guid = "291E47C6-8EC5-4040-8661-88B2AA39E23E"
+license = "LICENSE"
+eula = false
 
 [[bin]]
 name = "tiingo-mcp"
