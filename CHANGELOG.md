@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Distribution
+
+- Added Homebrew formula generation and a Windows MSI installer to the release build. Homebrew publication requires a configured tap and publishing credentials.
+- Added checks that install release artifacts and verify the installed server's version and MCP tool discovery.
+- Kept Cargo, install scripts, direct binary downloads, desktop bundles, and manual MCP configuration available.
+
+### Documentation
+
+- Added installation instructions by platform and clearer steps for configuring MCP clients.
+- Updated the README and package descriptions to explain the Tiingo MCP server's stock market and financial data tools in plain language.
+
 ## 2.1.1 (2026-09-30)
 
 ### Dependencies

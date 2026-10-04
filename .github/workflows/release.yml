@@ -313,9 +313,16 @@ jobs:
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
           RELEASE_TAG: "${{ needs.plan.outputs.tag }}"
+          HOMEBREW_TAP_ENABLED: "${{ vars.HOMEBREW_TAP_ENABLED }}"
         run: |
           # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          # The optional tap job runs after release creation. Do not advertise
+          # its generated install command before the formula has been published.
+          printf '%s\n' "$ANNOUNCEMENT_BODY" | awk '
+            /^### Install prebuilt binaries via Homebrew$/ { skip = 1; next }
+            skip && /^###? / { skip = 0 }
+            !skip { print }
+          ' > "$RUNNER_TEMP/notes.txt"
           RELEASE_TITLE="${RELEASE_TAG##*/}"
           RELEASE_TITLE="${RELEASE_TITLE#v}"
 
@@ -324,11 +331,84 @@ jobs:
             release_flags+=("$PRERELEASE_FLAG")
           fi
           gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" "${release_flags[@]}" --title "$RELEASE_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          if [[ "$HOMEBREW_TAP_ENABLED" != "true" ]]; then
+            echo "Homebrew publication disabled: set HOMEBREW_TAP_ENABLED=true after configuring the tap and token." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -n "$PRERELEASE_FLAG" ]]; then
+            echo "Homebrew publication skipped for this prerelease." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Homebrew publication requested; check the publish-homebrew job for its result." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-  announce:
+  # Provision the tap and token separately, then opt in with the repository
+  # variable HOMEBREW_TAP_ENABLED=true. An absent token or tap skips publishing.
+  publish-homebrew:
     needs:
       - plan
       - host
+    if: ${{ needs.host.result == 'success' && vars.HOMEBREW_TAP_ENABLED == 'true' && !fromJson(needs.plan.outputs.val).announcement_is_prerelease }}
+    runs-on: "ubuntu-22.04"
+    permissions:
+      "contents": "read"
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      - name: Check tap publication setup
+        id: tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "Homebrew publication skipped: HOMEBREW_TAP_TOKEN is not configured." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! gh api repos/major7apps/homebrew-tap --silent; then
+            echo "Homebrew publication skipped: major7apps/homebrew-tap is unavailable." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+      - name: Check out tap
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: major7apps/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          persist-credentials: false
+          path: homebrew-tap
+      - name: Fetch formula
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts-build-global
+          path: target/distrib/
+      - name: Publish formula
+        id: publish
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        working-directory: homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir -p Formula
+          cp ../target/distrib/tiingo-mcp.rb Formula/tiingo-mcp.rb
+          git add Formula/tiingo-mcp.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew formula is already current in major7apps/homebrew-tap." >> "$GITHUB_STEP_SUMMARY"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Update tiingo-mcp to $RELEASE_TAG"
+          gh auth setup-git --hostname github.com
+          git push
+          echo "Published tiingo-mcp for $RELEASE_TAG to major7apps/homebrew-tap." >> "$GITHUB_STEP_SUMMARY"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+  announce:
+    permissions:
+      "contents": "write"
+    needs:
+      - plan
+      - host
+      - publish-homebrew
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
@@ -341,3 +421,11 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Restore Homebrew release instructions
+        if: ${{ needs.publish-homebrew.outputs.published == 'true' }}
+        env:
+          ANNOUNCEMENT_BODY: ${{ fromJson(needs.host.outputs.val).announcement_github_body }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.txt"

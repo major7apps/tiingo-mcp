@@ -1,9 +1,9 @@
-# tiingo-mcp
+# Tiingo MCP server for stock market data
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/major7apps/tiingo-mcp/actions/workflows/ci.yml)
 
-tiingo-mcp is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for the [Tiingo](https://www.tiingo.com) financial data API, and it's written in Rust. An MCP client, such as Claude Code or Claude Desktop, starts the server and calls its tools to fetch stock, forex, crypto, fund, news, and fundamentals data from Tiingo.
+`tiingo-mcp` is a Rust [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for stock market data from [Tiingo](https://www.tiingo.com). Use it with Claude Code, Claude Desktop, or another MCP client to request stock prices, forex rates, crypto prices, fund data, financial news, and company fundamentals.
 
 The server exposes 38 tools, and it also provides three fixed resources, one resource template, and five prompts. The tools cover these areas:
 
@@ -12,15 +12,49 @@ The server exposes 38 tools, and it also provides three fixed resources, one res
 - Search, news, fundamentals, and corporate actions such as dividends and splits
 - Short, bounded subscriptions to Tiingo's live market data feeds
 
-The server talks to its MCP client over stdio, which means the client starts it as a child process and exchanges messages through standard input and output. The subscription tools open WebSocket connections to Tiingo, but the server itself does not offer an MCP WebSocket or Streamable HTTP transport.
+Prebuilt binaries are available for macOS, Linux, and Windows, so you can install the server without Rust. You need a Tiingo API key, and access to each dataset depends on the features enabled for your key.
 
-## Installation
+## Install Tiingo MCP
 
-The release installers, MCPB bundles, and the crates.io package all install the same server with the 38 tools documented below. You can install the server in four ways, and you only need one of them. The commands below always install the latest release.
+The release installers, MCPB bundles, and the crates.io package all install the same server with the 38 tools documented below. Choose one installation method, then [configure your MCP client](#configure-your-mcp-client). The desktop bundle includes the client configuration.
+
+| System or use | Installation method |
+|---|---|
+| macOS | [Homebrew](#homebrew-on-macos), or the [install script](#install-script) |
+| Linux | [Install script](#install-script) |
+| Windows | [Windows installer](#windows-installer), or the [PowerShell script](#install-script) |
+| Claude Desktop | [Desktop bundle](#claude-desktop-bundle-mcpb) |
+| Rust developers | [Cargo](#install-from-cratesio-with-cargo) |
+| Custom installation | [Download and install a binary](#prebuilt-binary) |
+
+Homebrew and Windows MSI support are prepared for the next release. Until those packages are published, use the install scripts, prebuilt binaries, or desktop bundles below.
+
+### Homebrew on macOS
+
+Once the Homebrew tap is published, install with:
+
+```bash
+brew install major7apps/tap/tiingo-mcp
+tiingo-mcp --version
+```
+
+Homebrew downloads the binary for your Mac. To update or remove it, run `brew upgrade tiingo-mcp` or `brew uninstall tiingo-mcp`.
+
+### Windows installer
+
+Starting with the next release, download `tiingo-mcp-x86_64-pc-windows-msvc.msi` from the [latest GitHub release](https://github.com/major7apps/tiingo-mcp/releases/latest). Open the installer and follow the installation steps. The installer adds the binary directory to `PATH` by default.
+
+Open a new terminal after installation and run:
+
+```powershell
+tiingo-mcp --version
+```
+
+Install a newer MSI to update the server. You can remove it through Windows Settings under Installed apps.
 
 ### Install script
 
-The install script is the quickest option. It detects your platform, downloads the matching prebuilt binary from the GitHub release, and puts it in Cargo's binary directory, which is `~/.cargo/bin` unless you set `CARGO_HOME`. You don't need Rust installed to use it.
+The install script detects your platform and downloads the matching prebuilt binary from the latest GitHub release. It installs into Cargo's binary directory, which is `~/.cargo/bin` unless you set `CARGO_HOME`. You don't need Rust installed to use it.
 
 On macOS or Linux, run:
 
@@ -34,7 +68,7 @@ On Windows, run this in PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/major7apps/tiingo-mcp/releases/latest/download/tiingo-mcp-installer.ps1 | iex"
 ```
 
-Make sure the binary directory is on your `PATH`, so that MCP clients can start the server by the name `tiingo-mcp`.
+Follow the installer's instructions to update your `PATH`, or open a new terminal. Run `tiingo-mcp --version` to check the installation, then [configure your MCP client](#configure-your-mcp-client). To update a script installation, run the same install command again.
 
 ### Prebuilt binary
 
@@ -48,7 +82,7 @@ You can download a prebuilt binary yourself if you'd rather not pipe a script in
 | Linux on ARM64 | `tiingo-mcp-aarch64-unknown-linux-musl.tar.xz` |
 | Windows on x86_64 | `tiingo-mcp-x86_64-pc-windows-msvc.zip` |
 
-The Linux binaries are statically linked, so they run on any distribution without extra libraries.
+The Linux binaries use static linking with musl.
 
 On macOS or Linux, set `TARGET` to the name from the table and run these commands. They download the archive and its checksum, check the archive against the checksum, and copy the binary to `~/.local/bin`.
 
@@ -76,11 +110,11 @@ The release workflow also publishes GitHub build attestations. If you have the G
 gh attestation verify "tiingo-mcp-$TARGET.tar.xz" -R major7apps/tiingo-mcp
 ```
 
-### MCPB desktop bundle
+### Claude Desktop bundle (MCPB)
 
 An MCPB bundle is a single file that a desktop MCP host, such as Claude Desktop, can install as an extension. Each release has one bundle per platform, named `tiingo-mcp-<target>.mcpb`, where `<target>` is one of the platform names in the table above. Download the bundle for your system, open it with your host's extension installer, and enter your Tiingo API key when the host asks for it. The bundle includes the binary and its MCP configuration, so you don't need to install the binary or set a path separately.
 
-### Cargo
+### Install from crates.io with Cargo
 
 If you have Rust 1.88 or newer, you can build and install the latest release from crates.io:
 
@@ -94,9 +128,11 @@ To install the current development version from a local checkout, run:
 cargo install --path . --locked
 ```
 
-## MCP configuration
+## Configure your MCP client
 
-You need a Tiingo API key, which you can create at [api.tiingo.com](https://api.tiingo.com). The data you can reach depends on the features enabled for your key, as described in [Access and quota](#access-and-quota).
+You need a Tiingo API key, which you can create at [api.tiingo.com](https://api.tiingo.com). The data you can access depends on the features enabled for your key, as described in [Access and quota](#access-and-quota).
+
+Homebrew, MSI, Cargo, and the install scripts install the server executable. You choose which MCP clients can use it and supply the API key in each client's settings. If you installed a desktop bundle, use the host's extension settings instead.
 
 Add the server to your MCP client's configuration:
 
@@ -114,6 +150,8 @@ Add the server to your MCP client's configuration:
 
 If `tiingo-mcp` isn't on the `PATH` that your client sees, set `command` to the full path of the binary.
 
+You can also use a full path to keep separate installations for different clients. The server reads `TIINGO_API_KEY` and `RUST_LOG` from the environment supplied by the client.
+
 In Claude Code, you can add the server with one command:
 
 ```bash
@@ -125,6 +163,8 @@ You can also start the server directly to check that it runs:
 ```bash
 TIINGO_API_KEY=your-api-key-here tiingo-mcp
 ```
+
+The server talks to its MCP client over stdio, which means the client starts it as a child process and exchanges messages through standard input and output. The subscription tools open WebSocket connections to Tiingo, but the server itself does not offer an MCP WebSocket or Streamable HTTP transport.
 
 The server writes only MCP protocol messages to stdout, and it writes diagnostic logs to stderr. It exits when stdin closes. You can control the log level with the `RUST_LOG` environment variable, e.g., `RUST_LOG=debug`.
 
@@ -163,7 +203,7 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 | `get_boats_snapshot` | Current BOATS snapshot for one ticker or for every ticker |
 | `get_boats_prices` | BOATS intraday history, with options for interval, after hours data, and columns |
 
-### Funds
+### Mutual fund and ETF data
 
 | Tool | Description |
 |---|---|
@@ -201,13 +241,13 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 | `get_crypto_prices` | Historical crypto prices |
 | `get_crypto_metadata` | Ticker metadata and supported exchanges |
 
-### News
+### Financial news
 
 | Tool | Description |
 |---|---|
 | `get_news` | Search financial news articles by ticker, tag, source, or date |
 
-### Fundamentals
+### Company fundamentals
 
 | Tool | Description |
 |---|---|

@@ -30,7 +30,13 @@ Native artifact jobs build and validate the binary and MCPB bundle on:
 - `x86_64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
+The native jobs also build cargo-dist release artifacts. They install the generated Homebrew formula on macOS, the shell installer on Linux, and the MSI on Windows. Each installation must match the freshly built binary and pass the stdio process tests, including version output, MCP initialization, and discovery of all 38 tools. Windows CI also uninstalls the MSI and checks that the executable was removed.
+
+`TIINGO_MCP_TEST_BINARY` selects an installed executable for `tests/stdio_process.rs`. Without that variable, the tests use the binary built by Cargo. Installer tests use local artifacts and do not require a Tiingo key or a published release.
+
 Release preparation also requires `dist plan`. A pull request is ready only when CodeRabbit has given an actual approval and every required check, including all five native/MCPB jobs, is green on that exact head.
+
+See [packaging/README.md](packaging/README.md) for Homebrew publication setup and Windows installer checks. A successful formula build does not prove that the Homebrew tap is published. MSI upgrade behavior requires an older installed version and a newer installer; the normal CI installation check alone does not prove an upgrade.
 
 ## Contract and direct-test expectations
 

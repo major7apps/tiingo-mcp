@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     io::{BufRead, BufReader, Read, Write},
     pin::Pin,
     process::{Child, Command, Stdio},
@@ -104,12 +105,17 @@ fn assert_protocol_only(bytes: &Arc<Mutex<Vec<u8>>>) {
 }
 
 fn child_process() -> std::io::Result<Child> {
-    Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"))
+    Command::new(test_binary())
         .env_remove("TIINGO_API_KEY")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
+}
+
+fn test_binary() -> OsString {
+    std::env::var_os("TIINGO_MCP_TEST_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_tiingo-mcp").into())
 }
 
 fn wait_for_exit(child: &mut Child) -> std::io::Result<std::process::ExitStatus> {
@@ -176,7 +182,7 @@ async fn local_registry(
 
 async fn initialize_discover_and_cancel() -> anyhow::Result<Duration> {
     let started = Instant::now();
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"));
+    let mut command = tokio::process::Command::new(test_binary());
     command.env_remove("TIINGO_API_KEY");
     let transport = rmcp::transport::TokioChildProcess::new(command)?;
     let client = VersionedClient(rmcp::model::ProtocolVersion::V_2025_11_25)
@@ -208,6 +214,14 @@ async fn initialize_discover_and_cancel() -> anyhow::Result<Duration> {
     assert!(discovery.capabilities.tools.is_some());
     assert!(discovery.capabilities.resources.is_some());
     assert!(discovery.capabilities.prompts.is_some());
+    let tools = client.list_tools(None).await?.tools;
+    assert_eq!(tools.len(), 38);
+    assert!(tools.iter().any(|tool| tool.name == "get_ticker_metadata"));
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool.name == "start_market_data_subscription")
+    );
     client.cancel().await?;
     Ok(started.elapsed())
 }
@@ -314,7 +328,7 @@ fn closing_stdin_terminates_the_server_within_five_seconds() -> anyhow::Result<(
 
 #[test]
 fn debug_diagnostics_stay_on_stderr_and_stdout_is_protocol_only() -> anyhow::Result<()> {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_tiingo-mcp"))
+    let mut child = Command::new(test_binary())
         .env_remove("TIINGO_API_KEY")
         .env("RUST_LOG", "debug")
         .stdin(Stdio::piped())
@@ -368,8 +382,7 @@ fn debug_diagnostics_stay_on_stderr_and_stdout_is_protocol_only() -> anyhow::Res
 
 #[test]
 fn help_exits_without_starting_mcp() {
-    AssertCommand::cargo_bin("tiingo-mcp")
-        .unwrap()
+    AssertCommand::new(test_binary())
         .arg("--help")
         .timeout(Duration::from_secs(5))
         .assert()
@@ -381,8 +394,7 @@ fn help_exits_without_starting_mcp() {
 
 #[test]
 fn version_exits_without_starting_mcp() {
-    AssertCommand::cargo_bin("tiingo-mcp")
-        .unwrap()
+    AssertCommand::new(test_binary())
         .arg("--version")
         .timeout(Duration::from_secs(5))
         .assert()

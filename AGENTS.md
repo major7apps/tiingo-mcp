@@ -9,6 +9,7 @@ Following [OpenAI Harness Engineering](https://openai.com/index/harness-engineer
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module boundaries, REST safety, upstream WebSocket lifecycle, and process ownership.
 - [API_SURFACE.md](API_SURFACE.md) — exact tool-to-route/access/test matrix and excluded surfaces.
 - [QUALITY.md](QUALITY.md) — local/CI gates, coverage, deterministic/live evidence, and documentation contracts.
+- [packaging/README.md](packaging/README.md) — installer builds, Homebrew setup, and release checks.
 - [README.md](README.md) — installation, MCP configuration, tools, entitlements, resources, and prompts.
 - [CHANGELOG.md](CHANGELOG.md) — released and unreleased user-facing changes.
 

@@ -12,7 +12,10 @@ ci = "github"
 # Release automation is intentionally tag-only.
 pr-run-mode = "skip"
 # The installers to generate for each app
-installers = ["shell", "powershell"]
+installers = ["shell", "powershell", "homebrew", "msi"]
+# The tap is provisioned separately; release.yml gates publication explicitly.
+tap = "major7apps/homebrew-tap"
+publish-jobs = ["homebrew"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 # Where to host releases
