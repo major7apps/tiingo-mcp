@@ -406,11 +406,23 @@ jobs:
             echo "published=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Update tiingo-mcp to $RELEASE_TAG"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "Update tiingo-mcp to $RELEASE_TAG"
           gh auth setup-git --hostname github.com
-          git push origin "HEAD:$DEFAULT_BRANCH"
-          echo "Published Formula/tiingo-mcp.rb for $RELEASE_TAG on $DEFAULT_BRANCH." >> "$GITHUB_STEP_SUMMARY"
-          echo "published=true" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              echo "Published Formula/tiingo-mcp.rb for $RELEASE_TAG on $DEFAULT_BRANCH." >> "$GITHUB_STEP_SUMMARY"
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "Homebrew publication failed after three push attempts; review the default branch before retrying." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+              exit 1
+            fi
+            git fetch origin "$DEFAULT_BRANCH"
+            git rebase FETCH_HEAD
+          done
 
   announce:
     permissions:

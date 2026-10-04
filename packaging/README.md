@@ -23,6 +23,8 @@ This repository also serves as the Homebrew tap. Stable releases update `Formula
 
 The publication job uses the repository's built-in `GITHUB_TOKEN` with `contents: write`. It does not need a personal access token, a separate repository, or Actions variables. Keep publication restricted to stable releases and ordinary pushes. If branch protection later blocks the bot's push, review and merge the generated formula through a pull request.
 
+If the default branch changes during publication, the job rebases its formula commit and retries the push up to three times. A rebase conflict or repeated rejection fails publication; review the branch and rerun the failed job or merge the release's generated formula through a pull request.
+
 Release notes include the Homebrew commands only after formula publication succeeds or confirms the formula is already current. Skipped or failed publication leaves those instructions out. Check the publication job before announcing Homebrew support.
 
 After a stable release, verify a public installation:
