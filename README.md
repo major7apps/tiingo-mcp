@@ -34,11 +34,16 @@ Homebrew and Windows MSI support are prepared for the next release. Until those 
 Once the Homebrew tap is published, install with:
 
 ```bash
-brew install major7apps/tap/tiingo-mcp
+brew tap major7apps/tiingo-mcp https://github.com/major7apps/tiingo-mcp
+brew install major7apps/tiingo-mcp/tiingo-mcp
 tiingo-mcp --version
 ```
 
-Homebrew downloads the binary for your Mac. To update or remove it, run `brew upgrade tiingo-mcp` or `brew uninstall tiingo-mcp`.
+The first command adds this repository to Homebrew. You only need to run it once. Homebrew downloads the binary for your Mac.
+
+To update, run `brew update` followed by `brew upgrade major7apps/tiingo-mcp/tiingo-mcp`. To remove the server, run `brew uninstall major7apps/tiingo-mcp/tiingo-mcp`.
+
+The formula is maintained in this repository. It is not yet available from Homebrew's central `homebrew/core` repository.
 
 ### Windows installer
 

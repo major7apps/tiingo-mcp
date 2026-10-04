@@ -17,18 +17,29 @@ The distribution plan must include the existing native archives and scripts, `ti
 
 The release workflow contains custom MCPB packaging, upload steps, and restricted job permissions. Review those steps when regenerating cargo-dist files. `allow-dirty = ["ci"]` preserves the customized workflow.
 
-## Set up Homebrew publication
+## Publish the Homebrew formula
 
-Homebrew publication is optional and requires setup outside this repository. Generating a formula does not make the Homebrew install command available.
+This repository also serves as the Homebrew tap. Stable releases update `Formula/tiingo-mcp.rb` on the default branch after uploading the release artifacts. The formula uses versioned download URLs and checksums from that release.
 
-Release notes include the Homebrew command only after the tap publication succeeds or confirms the formula is already current. Skipped or failed publication leaves those instructions out.
+The publication job uses the repository's built-in `GITHUB_TOKEN` with `contents: write`. It does not need a personal access token, a separate repository, or Actions variables. Keep publication restricted to stable releases and ordinary pushes. If branch protection later blocks the bot's push, review and merge the generated formula through a pull request.
 
-1. Create and initialize `major7apps/homebrew-tap` as a public GitHub repository.
-2. Add `HOMEBREW_TAP_TOKEN` as an Actions secret in `major7apps/tiingo-mcp`. Use a token with permission to write contents only in the tap repository.
-3. Set the Actions variable `HOMEBREW_TAP_ENABLED` to `true` after the repository and token are ready.
-4. After an authorized stable release, verify that the formula was published and install it on a Mac with `brew install major7apps/tap/tiingo-mcp`.
+If the default branch changes during publication, the job rebases its formula commit and retries the push up to three times. A rebase conflict or repeated rejection fails publication; review the branch and rerun the failed job or merge the release's generated formula through a pull request.
 
-Run `tiingo-mcp --version` and verify MCP initialization from the installed executable. Check the formula's version, download URLs, and checksums against the matching release. Confirm that `brew upgrade tiingo-mcp` and `brew uninstall tiingo-mcp` work before recommending the tap to users.
+Release notes include the Homebrew commands only after formula publication succeeds or confirms the formula is already current. Skipped or failed publication leaves those instructions out. Check the publication job before announcing Homebrew support.
+
+After a stable release, verify a public installation:
+
+```bash
+brew tap major7apps/tiingo-mcp https://github.com/major7apps/tiingo-mcp
+brew install major7apps/tiingo-mcp/tiingo-mcp
+tiingo-mcp --version
+```
+
+Verify MCP initialization from the installed executable. Check the formula's version, download URLs, and checksums against the matching release. Verify updates with `brew update` and `brew upgrade major7apps/tiingo-mcp/tiingo-mcp`, and removal with `brew uninstall major7apps/tiingo-mcp/tiingo-mcp`.
+
+The explicit URL is needed because the repository is not named `homebrew-tiingo-mcp`. Homebrew remembers the URL after the first `brew tap` command. See [Homebrew's tap documentation](https://docs.brew.sh/Taps).
+
+An official `homebrew/core` formula requires a source build and acceptance by Homebrew's maintainers. The repository tap remains available while the project works toward Homebrew's [acceptance requirements](https://docs.brew.sh/Package-Acceptance-Policy).
 
 Keep the install script available for Linux. The release binaries cover x86_64 and ARM64 Linux with static musl linking; Linux Homebrew installation needs its own verification before it is advertised.
 
