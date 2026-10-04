@@ -5,6 +5,7 @@ use tiingo_mcp::{
     config::{Config, RetryPolicy},
     error::TiingoError,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use url::Url;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -198,7 +199,6 @@ async fn request_deadlines_are_classified_as_timeout_errors() {
                 .set_delay(Duration::from_millis(100))
                 .set_body_json(serde_json::json!({"ok": true})),
         )
-        .expect(1)
         .mount(&server)
         .await;
     let mut config = test_config(Url::parse(&server.uri()).unwrap(), Some("test-key"));
@@ -479,6 +479,132 @@ async fn upstream_error_payload_and_display_never_expose_credentials() {
     assert!(!payload.message.contains("test-key"));
     assert!(!payload.message.contains("Token test-key"));
     assert!(!payload.message.contains("Authorization:"));
+}
+
+#[tokio::test]
+async fn full_error_prefix_returns_without_waiting_for_another_body_chunk() {
+    for status in [401, 500] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            stream
+                .write_all(
+                    format!("HTTP/1.1 {status} Error\r\nContent-Length: 100000\r\n\r\n").as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut prefix = b"diagnostic: test-key; ".to_vec();
+            prefix.resize(2048, b'x');
+            stream.write_all(&prefix).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let mut config = test_config(
+            Url::parse(&format!("http://{address}")).unwrap(),
+            Some("test-key"),
+        );
+        config.request_timeout = Duration::from_secs(5);
+        let client = TiingoClient::new(config).unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            client.get_json("stock prices", "/tiingo/daily/AAPL", &[]),
+        )
+        .await;
+        server.abort();
+        let error = result
+            .expect("a full bounded error prefix must not wait for the rest of the body")
+            .unwrap_err();
+
+        assert_eq!(error.payload().status_code, Some(status));
+        assert!(!format!("{error:?}").contains("test-key"));
+        if let TiingoError::Upstream { detail, .. } = error {
+            assert!(detail.starts_with("diagnostic: [REDACTED]; "));
+            assert_eq!(detail.chars().count(), 512);
+        }
+    }
+}
+
+#[tokio::test]
+async fn error_body_cap_does_not_expose_a_truncated_api_key() {
+    for (api_key, exposed_prefix) in [
+        (
+            "secret-prefix-0123456789abcdefghijklmnopqrstuvwxyz-remaining-key",
+            "secret-",
+        ),
+        (
+            "secret-prefix-0123456789abcdefghijklmnopqrstuvw🦀remaining",
+            "secret-",
+        ),
+        ("abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc", "abcabc"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_string(format!("{}{api_key}", "😀".repeat(500))),
+            )
+            .mount(&server)
+            .await;
+        let client = TiingoClient::new(test_config(
+            Url::parse(&server.uri()).unwrap(),
+            Some(api_key),
+        ))
+        .unwrap();
+
+        let error = client
+            .get_json("stock prices", "/tiingo/daily/AAPL", &[])
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.payload().status_code, Some(500));
+        assert!(!format!("{error:?}").contains(exposed_prefix));
+        assert!(!error.payload().message.contains(exposed_prefix));
+        let TiingoError::Upstream { detail, .. } = error else {
+            panic!("expected the sanitized upstream error detail");
+        };
+        assert!(detail.ends_with("[REDACTED]"));
+    }
+}
+
+#[tokio::test]
+async fn interrupted_error_body_does_not_expose_a_truncated_api_key() {
+    let api_key = "secret-prefix-0123456789abcdefghijklmnopqrstuvwxyz-remaining-key";
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = format!("{}{}", "😀".repeat(500), &api_key[..20]);
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 4096];
+        assert!(stream.read(&mut request).await.unwrap() > 0);
+        stream
+            .write_all(b"HTTP/1.1 500 Error\r\nContent-Length: 100000\r\n\r\n")
+            .await
+            .unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.shutdown().await.unwrap();
+    });
+    let client = TiingoClient::new(test_config(
+        Url::parse(&format!("http://{address}")).unwrap(),
+        Some(api_key),
+    ))
+    .unwrap();
+
+    let error = client
+        .get_json("stock prices", "/tiingo/daily/AAPL", &[])
+        .await
+        .unwrap_err();
+    server.await.unwrap();
+
+    assert!(!format!("{error:?}").contains("secret-"));
+    assert!(!error.payload().message.contains("secret-"));
+    let TiingoError::Upstream { status, detail, .. } = error else {
+        panic!("expected the sanitized upstream error detail");
+    };
+    assert_eq!(status, 500);
+    assert!(detail.ends_with("[REDACTED]"));
 }
 
 #[tokio::test]

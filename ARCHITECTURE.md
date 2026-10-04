@@ -37,6 +37,10 @@ All REST families use `TiingoClient::get_bytes` through either `get_json` or `ge
 - streams and bounds the decoded response to 8 MiB before parsing; and
 - maps 401 to authentication, 403 to entitlement, 404 to not-found, and retryable failures to sanitized MCP tool errors.
 
+Optional REST controls are validated by family clients and forwarded only when supplied. Existing omission behavior is unchanged. Explicit ticker batches use the existing snapshot routes with a bounded query filter; date sorting, as-reported statements, exchange filters, search controls and validated interval multiples do not add tools. See [API_SURFACE.md](API_SURFACE.md#approved-rest-controls) for the exact input-schema extensions.
+
+Error responses retain only a bounded diagnostic prefix. Reading stops as soon as that prefix is full, including when the remainder stalls. API-key redaction precedes publication and does not expose a key cut by the prefix boundary.
+
 Bulk EOD refresh is the intentional CSV consumer. It parses `/tiingo/daily/prices?format=csv` into typed JSON while preserving raw and adjusted OHLCV, `divCash`, and `splitFactor`. A non-unit split factor or positive cash dividend marks the ticker for a full historical reseed from `/tiingo/daily/{ticker}/prices`.
 
 ## Upstream WebSocket lifecycle
@@ -51,15 +55,15 @@ active -> stop / expiry / data_gap / terminal error -> cancel -> close -> join
 active -> transport or 75-second liveness failure -> bounded reconnect -> active/error
 ```
 
-`start` accepts 1–100 explicit symbols and at most eight process-local sessions. It generates a 32-character lowercase hexadecimal local ID and waits no more than five seconds for the initial `I` acknowledgement. IEX defaults to threshold 6; levels 0 and 5 require explicit direct-agreement confirmation. Consolidated equity defaults to 6 and accepts only 4 or 6.
+`start` accepts 1–100 explicit symbols and at most eight process-local sessions. It generates a 32-character lowercase hexadecimal local ID and waits no more than five seconds for the initial `I` acknowledgement. IEX defaults to threshold 6; levels 0 and 5 require explicit direct-agreement confirmation. Consolidated equity defaults to 6 and accepts only 4 or 6. Publication samples the actual state from the retained session handle after acknowledgement, even if terminal-session pruning has removed its registry entry; an already-terminal worker is not reported as active. An acknowledgement and a bounded poll with no events establish connection acceptance, not market-data delivery.
 
-The concrete WebSocket client applies 8-MiB frame and reassembled-message limits before protocol parsing, including during initial and update acknowledgements. Capacity failures are terminal protocol failures and do not reconnect.
+The concrete WebSocket client applies 8-MiB frame and reassembled-message limits before protocol parsing, including during initial and update acknowledgements. Capacity failures, malformed wire frames and invalid UTF-8 are terminal protocol failures and do not reconnect, whether received while active or awaiting initial, update or recovery acknowledgement. A reset without a closing handshake remains a recoverable transport failure.
 
 Each session has a 2,048-event, 8-MiB queue. The next event that would exceed either bound terminates the session as `data_gap`; data is never silently dropped. Polling uses a local arrival cursor and returns at most 256 events, 1 MiB, or five seconds of wait. Byte admission serializes the fixed envelope once and each candidate event once, while retaining exact JSON-size accounting. Reusing a cursor replays the same retained events. Cancelling a poll cancels only that request.
 
 Events retain vendor time and local receive time. Arrival sequence is authoritative. Duplicate and decreasing vendor timestamps are preserved and flagged as `duplicate` and `outOfOrder` rather than discarded or reordered. Duplicate fingerprints use a recent-observation window bounded to 2,048 entries and 8 MiB, so the tracking state remains finite; a recurrence after its fingerprint has aged out is treated as a new observation.
 
-Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication and entitlement failures do not reconnect. Terminal polls retain only the sanitized `authentication`, `entitlement`, `transport`, or `protocol` classification; upstream rejection text is discarded. Heartbeats and data refresh the 75-second liveness deadline.
+Recoverable transport/liveness failures reconnect after exactly 250, 500, 1,000, 2,000, and 4,000 milliseconds. Each attempt creates a fresh connection, subscribes again, and adopts the new upstream ID. Authentication, entitlement and malformed-protocol failures do not reconnect. Terminal polls retain only the sanitized `authentication`, `entitlement`, `transport`, or `protocol` classification; upstream rejection text is discarded. Heartbeats and data refresh the 75-second liveness deadline.
 
 A session expires after 30 minutes absolute lifetime or five minutes without a registry call. Updates may add or remove symbols; changing threshold requires stop/start. When a multi-leg update partially applies before a failure, the sanitized tool error includes `appliedSymbols` so the caller can resynchronize with the inventory used by reconnect; an empty applied inventory is terminal and never reconnects. Stop is idempotent and performs best-effort unsubscribe, socket close, cancellation, and join.
 

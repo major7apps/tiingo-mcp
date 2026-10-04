@@ -1,7 +1,7 @@
 {
   "asset_class": "fundamentals",
   "availability": {
-    "as_of": "2026-08-25",
+    "as_of": "2026-10-04",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/fundamentals"
@@ -26,5 +26,9 @@
     "Use get_financial_statements for quarterly/annual income, balance sheet, and cash flow data.",
     "Use get_daily_fundamentals for time-series of daily metrics like marketCap and P/E ratio; select columns when the full response is unnecessary.",
     "Use get_company_meta for sector, industry, country, and SIC code; it supports multiple tickers and selected columns."
-  ]
+  ],
+  "request_controls": {
+    "statements": "as_reported=true requests statements as filed with the SEC, indexed by release date; false or omission uses the latest revisions indexed by fiscal end date. sort accepts date or -date.",
+    "daily": "get_daily_fundamentals accepts sort by field name with an optional leading - for descending."
+  }
 }

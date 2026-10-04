@@ -73,6 +73,48 @@ fn query_enums_match_every_supported_tiingo_wire_value() {
     );
 }
 
+/// Require literal IEX batch paths, preserve the all-market default, and reject malformed lists before HTTP.
+#[tokio::test]
+async fn iex_snapshot_batches_use_documented_paths_without_query_filters() {
+    let server = MockServer::start().await;
+    let client = TiingoClient::new(test_config(Url::parse(&server.uri()).unwrap())).unwrap();
+    let cases = [
+        (None, "/iex"),
+        (Some(vec![" AAPL ".to_owned()]), "/iex/aapl"),
+        (
+            Some(vec![" AAPL ".to_owned(), "SPY".to_owned()]),
+            "/iex/aapl,spy",
+        ),
+    ];
+    for (tickers, route) in &cases {
+        let payload = serde_json::json!({"route":route});
+        Mock::given(method("GET"))
+            .and(path(*route))
+            .respond_with(ResponseTemplate::new(200).set_body_json(payload.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        assert_eq!(
+            client
+                .get_iex_market_snapshot_with_tickers(tickers.as_deref())
+                .await
+                .unwrap(),
+            payload
+        );
+    }
+    for invalid in [vec![], vec!["AAPL,SPY".into()], vec!["../SPY".into()]] {
+        assert!(matches!(
+            client
+                .get_iex_market_snapshot_with_tickers(Some(&invalid))
+                .await,
+            Err(TiingoError::Validation(_))
+        ));
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), cases.len());
+    assert!(requests.iter().all(|request| request.url.query().is_none()));
+}
+
 #[tokio::test]
 async fn market_client_methods_use_the_exact_tiingo_routes_and_queries() {
     let server = MockServer::start().await;

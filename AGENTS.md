@@ -15,7 +15,7 @@ Following [OpenAI Harness Engineering](https://openai.com/index/harness-engineer
 
 ## Public contract
 
-- Expose 38 tools while preserving the original 17 tool names, required inputs, omission behavior, and results; four approved optional `columns` additions are the only legacy descriptor deltas.
+- Expose 38 tools while preserving the original 17 tool names, required inputs, omission behavior, and results. Approved optional REST controls and broader intraday intervals are the only legacy input-schema extensions; [API_SURFACE.md](API_SURFACE.md) records the exact deltas.
 - Preserve three fixed resources, one resource template, five prompts, stdio transport, JSON text compatibility, structured content, and `TIINGO_API_KEY` authentication.
 - Tiingo WebSockets are upstream data connections exposed through four finite tools. Do not describe or implement an MCP WebSocket or Streamable HTTP transport.
 

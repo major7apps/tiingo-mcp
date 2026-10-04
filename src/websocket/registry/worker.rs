@@ -11,7 +11,7 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
     time::{Instant, sleep_until, timeout},
 };
-use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
+use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message, error::ProtocolError};
 
 use crate::{
     config::{
@@ -43,6 +43,7 @@ static WORST_CASE_EMPTY_POLL_BYTES: LazyLock<usize> = LazyLock::new(|| {
     .len()
 });
 
+/// Own acknowledgement, active receive, updates, bounded recovery, and terminal socket cleanup.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_worker(
     session: Arc<Session>,
@@ -307,12 +308,18 @@ pub(super) async fn run_worker(
                         bounded_close_socket(&mut socket).await;
                         return;
                     }
-                    Some(Err(WebSocketError::Capacity(_))) => {
-                        set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
-                        bounded_close_socket(&mut socket).await;
-                        return;
+                    Some(Err(error)) => {
+                        if matches!(
+                            map_socket_receive_error(error),
+                            TiingoError::WebSocketProtocol { .. }
+                        ) {
+                            set_terminal_failure(&session, TerminalErrorKind::Protocol).await;
+                            bounded_close_socket(&mut socket).await;
+                            return;
+                        }
+                        true
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => true,
+                    Some(Ok(Message::Close(_))) | None => true,
                     _ => false,
                 }
             }
@@ -979,10 +986,19 @@ fn terminal_error_kind(error: &TiingoError) -> TerminalErrorKind {
     }
 }
 
+/// Classify malformed wire data as terminal while allowing abrupt transport reset recovery.
 fn map_socket_receive_error(error: WebSocketError) -> TiingoError {
     match error {
         WebSocketError::Capacity(_) => TiingoError::WebSocketProtocol {
             reason: "WebSocket message exceeded the configured size limit",
+        },
+        WebSocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake) => {
+            TiingoError::Transport {
+                capability: CAPABILITY,
+            }
+        }
+        WebSocketError::Protocol(_) | WebSocketError::Utf8(_) => TiingoError::WebSocketProtocol {
+            reason: "WebSocket message was malformed",
         },
         _ => TiingoError::Transport {
             capability: CAPABILITY,

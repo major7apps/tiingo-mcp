@@ -20,6 +20,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch forex bars with minute/hour intervals and the legacy one-day interval.
     pub async fn get_forex_prices(
         &self,
         ticker: &str,
@@ -30,6 +31,7 @@ impl TiingoClient {
         let mut query = Vec::new();
         range.append(&mut query);
         if let Some(value) = resample {
+            value.validate_market_interval()?;
             query.push(("resampleFreq", value.as_str().to_owned()));
         }
         self.get_json(

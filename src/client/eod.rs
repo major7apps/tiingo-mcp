@@ -1,6 +1,9 @@
 use super::{
     TiingoClient,
-    query::{DateRange, EodResample, validate_path_segment, validate_ticker_metadata_columns},
+    query::{
+        DateRange, EodResample, validate_column_list, validate_path_segment, validate_sort,
+        validate_ticker_metadata_columns,
+    },
 };
 use crate::error::TiingoError;
 
@@ -57,17 +60,37 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch raw and adjusted EOD bars while preserving existing query defaults.
     pub async fn get_stock_prices(
         &self,
         ticker: &str,
         range: DateRange,
         resample: Option<EodResample>,
     ) -> Result<serde_json::Value, TiingoError> {
+        self.get_stock_prices_with_options(ticker, range, resample, None, None)
+            .await
+    }
+
+    /// Fetch EOD bars with validated column selection and optional field ordering.
+    pub async fn get_stock_prices_with_options(
+        &self,
+        ticker: &str,
+        range: DateRange,
+        resample: Option<EodResample>,
+        columns: Option<&[String]>,
+        sort: Option<&str>,
+    ) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         let mut query = Vec::new();
         range.append(&mut query);
         if let Some(value) = resample {
             query.push(("resampleFreq", value.as_str().to_owned()));
+        }
+        if let Some(value) = validate_column_list(columns)? {
+            query.push(("columns", value));
+        }
+        if let Some(value) = validate_sort(sort)? {
+            query.push(("sort", value));
         }
         self.get_json(
             "stock prices",

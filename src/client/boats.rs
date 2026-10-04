@@ -1,14 +1,32 @@
 use super::{
     TiingoClient,
-    query::{DateRange, IntradayResample, validate_column_list, validate_path_segment},
+    query::{
+        DateRange, IntradayResample, normalize_symbol_list, validate_column_list,
+        validate_path_segment,
+    },
 };
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    /// Fetch one BOATS ticker, or preserve the all-market default when omitted.
     pub async fn get_boats_snapshot(
         &self,
         ticker: Option<&str>,
     ) -> Result<serde_json::Value, TiingoError> {
+        self.get_boats_snapshot_with_tickers(ticker, None).await
+    }
+
+    /// Fetch BOATS snapshots with mutually exclusive single-ticker and bounded ticker-list filters.
+    pub async fn get_boats_snapshot_with_tickers(
+        &self,
+        ticker: Option<&str>,
+        tickers: Option<&[String]>,
+    ) -> Result<serde_json::Value, TiingoError> {
+        if ticker.is_some() && tickers.is_some() {
+            return Err(TiingoError::Validation(
+                "ticker and tickers cannot be supplied together".into(),
+            ));
+        }
         let path = match ticker {
             Some(ticker) => {
                 validate_path_segment(ticker)?;
@@ -16,9 +34,15 @@ impl TiingoClient {
             }
             None => "/boats".to_owned(),
         };
-        self.get_json("BOATS real-time snapshot", &path, &[]).await
+        let mut query = Vec::new();
+        if let Some(tickers) = tickers {
+            query.push(("tickers", normalize_symbol_list(tickers)?));
+        }
+        self.get_json("BOATS real-time snapshot", &path, &query)
+            .await
     }
 
+    /// Fetch BOATS history with the legacy omission behavior and no explicit gap-fill override.
     pub async fn get_boats_prices(
         &self,
         ticker: &str,
@@ -27,10 +51,25 @@ impl TiingoClient {
         after_hours: Option<bool>,
         columns: Option<&[String]>,
     ) -> Result<serde_json::Value, TiingoError> {
+        self.get_boats_prices_with_options(ticker, range, resample, after_hours, columns, None)
+            .await
+    }
+
+    /// Fetch overnight BOATS bars with validated intervals, columns, and optional gap filling.
+    pub async fn get_boats_prices_with_options(
+        &self,
+        ticker: &str,
+        range: DateRange,
+        resample: Option<IntradayResample>,
+        after_hours: Option<bool>,
+        columns: Option<&[String]>,
+        force_fill: Option<bool>,
+    ) -> Result<serde_json::Value, TiingoError> {
         validate_path_segment(ticker)?;
         let mut query = Vec::new();
         range.append(&mut query);
         if let Some(value) = resample {
+            value.validate_market_interval()?;
             query.push(("resampleFreq", value.as_str().to_owned()));
         }
         if let Some(value) = after_hours {
@@ -38,6 +77,9 @@ impl TiingoClient {
         }
         if let Some(value) = validate_column_list(columns)? {
             query.push(("columns", value));
+        }
+        if let Some(value) = force_fill {
+            query.push(("forceFill", value.to_string()));
         }
         self.get_json("BOATS prices", &format!("/boats/{ticker}/prices"), &query)
             .await

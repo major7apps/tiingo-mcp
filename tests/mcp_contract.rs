@@ -207,6 +207,94 @@ fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
     tools
 }
 
+/// Exact discovery metadata corrections approved during PR review.
+fn approved_rest_metadata(name: &str) -> &'static [(&'static str, &'static str)] {
+    match name {
+        "get_stock_prices" => &[
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_intraday_prices" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour); day intervals are not supported. Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "after_hours",
+                "Optional inclusion of after-hours prices; explicit false is forwarded, omission preserves Tiingo defaults.",
+            ),
+            (
+                "force_fill",
+                "Forward-fill missing intervals when true; explicit false is forwarded, omission preserves Tiingo defaults.",
+            ),
+        ],
+        "get_forex_prices" => &[(
+            "resample_freq",
+            "Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.",
+        )],
+        "get_crypto_quote" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min, hour, or day (e.g. 45min, 4hour, 2day). Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "exchanges",
+                "Optional 1–100 exchange identifiers; identifier case and order are preserved. Omit to use Tiingo defaults.",
+            ),
+        ],
+        "get_crypto_prices" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min, hour, or day (e.g. 45min, 4hour, 2day). Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "exchanges",
+                "Optional 1–100 exchange identifiers; identifier case and order are preserved. Omit to use Tiingo defaults.",
+            ),
+        ],
+        "get_financial_statements" => &[
+            (
+                "as_reported",
+                "When true, return statements as released using SEC filing publication dates; false uses latest revisions and fiscal-period dates. Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional date or -date ordering; other field names are rejected. Omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_daily_fundamentals" => &[
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_company_meta" => &[(
+            "columns",
+            "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+        )],
+        "get_dividend_yield" => &[(
+            "columns",
+            "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+        )],
+        _ => &[],
+    }
+}
+
+/// Normalize only approved optional inputs and exact discovery metadata before comparing the frozen oracle.
 fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
     let legacy_names = baseline["tools"]
         .as_array()
@@ -224,29 +312,91 @@ fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
         "legacy tools are missing"
     );
     for tool in &mut legacy_tools {
-        if matches!(
-            tool["name"].as_str(),
-            Some(
-                "get_intraday_prices"
-                    | "get_daily_fundamentals"
-                    | "get_company_meta"
-                    | "get_dividend_yield"
-            )
-        ) {
-            let properties = tool["inputSchema"]["properties"]
+        let name = tool["name"].as_str().unwrap().to_owned();
+        let metadata = approved_rest_metadata(&name);
+        if !metadata.is_empty() {
+            let baseline_tool = baseline["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .unwrap();
+            let mut legacy_description = baseline_tool["description"].as_str().unwrap().to_owned();
+            if name == "get_crypto_quote" {
+                legacy_description = replace_exact_once(
+                    &legacy_description,
+                    "Get current top-of-book crypto prices.",
+                    "Get current crypto prices.",
+                );
+            }
+            let mut expected_description = legacy_description.clone();
+            for (field, description) in metadata {
+                let property = tool["inputSchema"]["properties"][*field]
+                    .as_object_mut()
+                    .unwrap();
+                remove_exact(
+                    property,
+                    "description",
+                    Value::String((*description).to_owned()),
+                );
+                let line = format!("    {field}: {description}");
+                if *field == "resample_freq" && name != "get_crypto_quote" {
+                    let old = if name == "get_intraday_prices" {
+                        "    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, etc."
+                    } else {
+                        "    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day."
+                    };
+                    expected_description = replace_exact_once(&expected_description, old, &line);
+                } else {
+                    assert!(
+                        !expected_description.contains(&format!("    {field}:")),
+                        "frozen descriptor already contained {name}.{field}"
+                    );
+                    expected_description.push('\n');
+                    expected_description.push_str(&line);
+                }
+            }
+            replace_exact(
+                tool.as_object_mut().unwrap(),
+                "description",
+                Value::String(expected_description),
+                Value::String(legacy_description),
+            );
+        }
+        let extensions: &[(&str, &str)] = match tool["name"].as_str().unwrap() {
+            "get_stock_prices" => &[("columns", "array"), ("sort", "string")],
+            "get_intraday_prices" => &[
+                ("columns", "array"),
+                ("after_hours", "boolean"),
+                ("force_fill", "boolean"),
+            ],
+            "get_daily_fundamentals" => &[("columns", "array"), ("sort", "string")],
+            "get_company_meta" | "get_dividend_yield" => &[("columns", "array")],
+            "get_financial_statements" => &[("as_reported", "boolean"), ("sort", "string")],
+            "get_crypto_quote" => &[("exchanges", "array"), ("resample_freq", "string")],
+            "get_crypto_prices" => &[("exchanges", "array")],
+            _ => &[],
+        };
+        for (name, kind) in extensions {
+            assert!(
+                !tool["inputSchema"]["required"]
+                    .as_array()
+                    .is_some_and(|fields| fields.contains(&serde_json::json!(name))),
+                "extension must remain optional"
+            );
+            let extension = tool["inputSchema"]["properties"]
                 .as_object_mut()
-                .expect("legacy tool input schema properties are an object");
-            let columns = properties
-                .remove("columns")
-                .expect("legacy columns extension is present");
+                .unwrap()
+                .remove(*name)
+                .expect("approved optional extension is present");
+            let mut expected = serde_json::json!({"default":null,"type":[kind,"null"]});
+            if *kind == "array" {
+                expected["items"] = serde_json::json!({"type":"string"});
+            }
             assert_eq!(
-                normalize_schema(columns),
-                serde_json::json!({
-                    "default": null,
-                    "items": {"type": "string"},
-                    "type": ["array", "null"]
-                }),
-                "legacy columns extension drifted"
+                normalize_schema(extension),
+                normalize_schema(expected),
+                "{name} extension drifted"
             );
         }
     }
@@ -441,6 +591,7 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     body
 }
 
+/// Verify and remove only the named source-date, access, and additive resource corrections.
 fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
     let object = body.as_object_mut().unwrap();
     let entitlement_statement = "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability.";
@@ -449,7 +600,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
             replace_exact(
                 object,
                 "as_of",
-                Value::String("2026-08-25".to_owned()),
+                Value::String("2026-10-04".to_owned()),
                 Value::String(SOURCE_DATE.to_owned()),
             );
             replace_exact(
@@ -572,7 +723,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [
                         "https://www.tiingo.com/documentation/general/overview",
                         "https://www.tiingo.com/documentation/corporate-actions/dividends",
@@ -636,7 +787,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/crypto"],
                     "statement": entitlement_statement
                 }),
@@ -684,7 +835,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/forex"],
                     "statement": entitlement_statement
                 }),
@@ -719,7 +870,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/fundamentals"],
                     "statement": entitlement_statement
                 }),
@@ -765,7 +916,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/news"],
                     "statement": entitlement_statement
                 }),
@@ -815,7 +966,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-08-25",
+                    "as_of": "2026-10-04",
                     "official_sources": [
                         "https://www.tiingo.com/documentation/general/overview",
                         "https://www.tiingo.com/documentation/end-of-day",
@@ -902,6 +1053,42 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
     body
 }
 
+/// Verify and remove only the explicitly documented REST guide additions.
+fn remove_rest_control_delta(uri: &str, mut body: Value) -> Value {
+    if uri == "tiingo://guide/stocks" {
+        assert_eq!(
+            body["common_pitfalls"][0],
+            "Tiingo may return stock tickers in lowercase; compare ticker identities without regard to ASCII case."
+        );
+        body["common_pitfalls"][0] =
+            serde_json::json!("Ticker symbols are case-sensitive in the URL -- always uppercase.");
+    }
+    let controls = match uri {
+        "tiingo://guide/stocks" => {
+            serde_json::json!({"eod": "get_stock_prices accepts columns and sort (a field name, prefixed with - for descending).", "iex_history": "get_intraday_prices accepts after_hours and force_fill; resample_freq accepts positive integer min or hour intervals such as 45min or 4hour.", "snapshots": "get_iex_market_snapshot, get_equity_realtime_snapshot, and get_boats_snapshot accept tickers arrays of 1 to 100 symbols. Supply ticker or tickers, never both; omitting both preserves the all-market request.", "boats_history": "get_boats_prices accepts force_fill. Consolidated and BOATS history accept custom positive integer intervals; existing 1day remains supported."})
+        }
+        "tiingo://guide/fundamentals" => {
+            serde_json::json!({"statements": "as_reported=true requests statements as filed with the SEC, indexed by release date; false or omission uses the latest revisions indexed by fiscal end date. sort accepts date or -date.", "daily": "get_daily_fundamentals accepts sort by field name with an optional leading - for descending."})
+        }
+        "tiingo://guide/search" => {
+            serde_json::json!({"filters": "exact_ticker_match and include_delisted are optional booleans; limit must be 1 to 100. Omitted controls preserve Tiingo defaults."})
+        }
+        "tiingo://guide/crypto" => {
+            serde_json::json!({"prices": "get_crypto_quote and get_crypto_prices accept exchanges arrays of 1 to 100 identifiers, preserving exchange spelling and order.", "intervals": "Both price tools accept resample_freq as a positive integer followed by min, hour, or day (for example 45min, 4hour, or 2day)."})
+        }
+        "tiingo://guide/forex" => {
+            serde_json::json!({"intervals": "get_forex_prices accepts custom positive integer min or hour intervals; existing 1day remains supported."})
+        }
+        "tiingo://guide/crypto-yield" => {
+            serde_json::json!({"intervals": "get_crypto_yield_metrics accepts resample_freq as a positive integer followed by min, hour, or day."})
+        }
+        _ => return body,
+    };
+    remove_exact(body.as_object_mut().unwrap(), "request_controls", controls);
+    body
+}
+
+/// Normalize approved resource metadata while retaining unrelated contract fields.
 fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
     normalize_protocol_metadata(result.as_object_mut().unwrap());
     for content in result["contents"].as_array_mut().unwrap() {
@@ -917,7 +1104,7 @@ fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Va
         if expected {
             body = expected_resource_body(uri, body);
         } else {
-            body = remove_task8_resource_delta(uri, body);
+            body = remove_task8_resource_delta(uri, remove_rest_control_delta(uri, body));
             if uri == "tiingo://capabilities" {
                 let version = body
                     .as_object_mut()

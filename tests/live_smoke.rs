@@ -1,3 +1,10 @@
+#[allow(dead_code)]
+#[path = "support/live_cases.rs"]
+mod live_cases;
+use live_cases::{
+    MarketPollOutcome, ResponseShape, classify_market_poll, classify_market_poll_for_service,
+};
+
 use std::{
     future::Future,
     time::{Duration, Instant},
@@ -21,129 +28,7 @@ use tiingo_mcp::{
 enum LiveOutcome {
     Success,
     Entitlement,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ResponseShape {
-    NonEmptyObject,
-    NonEmptyObjectArray,
-    ForexQuote {
-        ticker: &'static str,
-    },
-    CryptoQuote {
-        ticker: &'static str,
-    },
-    NewsArticle,
-    FundamentalsDefinition,
-    Dividend {
-        ticker: &'static str,
-    },
-    Split {
-        ticker: &'static str,
-    },
-    EquitySnapshot {
-        ticker: &'static str,
-        price_fields: &'static [&'static str],
-    },
-    IntradayBar,
-}
-
-impl ResponseShape {
-    fn matches(self, value: &Value) -> bool {
-        match self {
-            Self::NonEmptyObject => value.as_object().is_some_and(|object| !object.is_empty()),
-            Self::NonEmptyObjectArray => value.as_array().is_some_and(|rows| {
-                !rows.is_empty()
-                    && rows
-                        .iter()
-                        .all(|row| row.as_object().is_some_and(|object| !object.is_empty()))
-            }),
-            Self::ForexQuote { ticker } => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        string_field_is(object, "ticker", ticker)
-                            && has_number(object, &["bidPrice", "askPrice", "midPrice"])
-                    })
-                })
-            }),
-            Self::CryptoQuote { ticker } => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        string_field_is(object, "ticker", ticker)
-                            && (has_number(
-                                object,
-                                &["lastPrice", "bidPrice", "askPrice", "midPrice", "close"],
-                            ) || nested_rows_have_number(
-                                object,
-                                "topOfBookData",
-                                &["lastPrice", "bidPrice", "askPrice", "midPrice"],
-                            ) || nested_rows_have_number(
-                                object,
-                                "priceData",
-                                &["open", "high", "low", "close", "lastPrice"],
-                            ))
-                    })
-                })
-            }),
-            Self::NewsArticle => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        object.get("id").is_some_and(|id| {
-                            id.as_str().is_some_and(|value| !value.is_empty()) || id.is_number()
-                        }) && non_empty_string(object, "title")
-                            && (non_empty_string(object, "publishedDate")
-                                || non_empty_string(object, "crawlDate"))
-                    })
-                })
-            }),
-            Self::FundamentalsDefinition => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        ["dataCode", "code", "name"]
-                            .iter()
-                            .any(|field| non_empty_string(object, field))
-                    })
-                })
-            }),
-            Self::Dividend { ticker } => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        string_field_is(object, "ticker", ticker)
-                            && non_empty_string(object, "exDate")
-                            && has_number(object, &["distribution"])
-                    })
-                })
-            }),
-            Self::Split { ticker } => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        string_field_is(object, "ticker", ticker)
-                            && non_empty_string(object, "exDate")
-                            && has_number(object, &["splitFactor"])
-                    })
-                })
-            }),
-            Self::EquitySnapshot {
-                ticker,
-                price_fields,
-            } => value.as_array().is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.as_object().is_some_and(|object| {
-                        string_field_is(object, "ticker", ticker)
-                            && has_number(object, price_fields)
-                    })
-                })
-            }),
-            Self::IntradayBar => value.as_array().is_some_and(|rows| {
-                !rows.is_empty()
-                    && rows.iter().all(|row| {
-                        row.as_object().is_some_and(|object| {
-                            non_empty_string(object, "date") && valid_ohlcv_bar(object)
-                        })
-                    })
-            }),
-        }
-    }
+    AcknowledgedNoData,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -181,59 +66,6 @@ fn report_latency_distribution(capability: &str, operation: &str, samples: &[Dur
     println!(
         "LIVE {capability}: operation={operation}, latency count={count}, min={min:?}, p50={p50:?}, p95={p95:?}, max={max:?}"
     );
-}
-
-fn non_empty_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty())
-}
-
-fn string_field_is(object: &serde_json::Map<String, Value>, field: &str, expected: &str) -> bool {
-    object.get(field).and_then(Value::as_str) == Some(expected)
-}
-
-fn has_number(object: &serde_json::Map<String, Value>, fields: &[&str]) -> bool {
-    fields
-        .iter()
-        .any(|field| object.get(*field).is_some_and(Value::is_number))
-}
-
-fn valid_ohlcv_bar(object: &serde_json::Map<String, Value>) -> bool {
-    let Some(open) = object.get("open").and_then(Value::as_f64) else {
-        return false;
-    };
-    let Some(high) = object.get("high").and_then(Value::as_f64) else {
-        return false;
-    };
-    let Some(low) = object.get("low").and_then(Value::as_f64) else {
-        return false;
-    };
-    let Some(close) = object.get("close").and_then(Value::as_f64) else {
-        return false;
-    };
-    let Some(volume) = object.get("volume").and_then(Value::as_f64) else {
-        return false;
-    };
-
-    high >= open && high >= close && high >= low && low <= open && low <= close && volume >= 0.0
-}
-
-fn nested_rows_have_number(
-    object: &serde_json::Map<String, Value>,
-    field: &str,
-    price_fields: &[&str],
-) -> bool {
-    object
-        .get(field)
-        .and_then(Value::as_array)
-        .is_some_and(|rows| {
-            rows.iter().any(|row| {
-                row.as_object()
-                    .is_some_and(|row| has_number(row, price_fields))
-            })
-        })
 }
 
 async fn classify(
@@ -319,6 +151,7 @@ fn require_live_api_key() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Measure bounded level-six acknowledgement, poll classification, and cleanup over three samples.
 async fn live_market_data_lifecycle(
     capability: &str,
     service: Service,
@@ -330,6 +163,7 @@ async fn live_market_data_lifecycle(
     let mut start_latencies = Vec::with_capacity(SAMPLES);
     let mut poll_latencies = Vec::with_capacity(SAMPLES);
     let mut stop_latencies = Vec::with_capacity(SAMPLES);
+    let mut delivery_samples = 0;
 
     for _ in 0..SAMPLES {
         let started_at = Instant::now();
@@ -395,19 +229,7 @@ async fn live_market_data_lifecycle(
                 ));
             }
         };
-        if poll.events.len() > 1 {
-            registry.shutdown().await;
-            anyhow::bail!("LIVE {capability}: bounded poll returned more than one event");
-        }
-        if let Some(event) = poll.events.first()
-            && !matches!(
-                event.payload.get("messageType").and_then(Value::as_str),
-                Some("A" | "H")
-            )
-        {
-            registry.shutdown().await;
-            anyhow::bail!("LIVE {capability}: bounded poll returned an unexpected message type");
-        }
+        let poll_outcome = classify_market_poll_for_service(&poll, service, &["AAPL"]);
         match stop {
             Ok(Ok(_)) => {}
             Ok(Err(error)) => {
@@ -421,32 +243,56 @@ async fn live_market_data_lifecycle(
                 ));
             }
         }
+        let poll_outcome = match poll_outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                registry.shutdown().await;
+                return Err(error);
+            }
+        };
+        match poll_outcome {
+            MarketPollOutcome::Entitlement => {
+                registry.shutdown().await;
+                println!(
+                    "LIVE {capability}: entitlement after activation (HTTP 403); remaining samples skipped"
+                );
+                return Ok(LiveOutcome::Entitlement);
+            }
+            MarketPollOutcome::Delivery => delivery_samples += 1,
+            MarketPollOutcome::AcknowledgedNoData => {
+                println!(
+                    "LIVE {capability}: acknowledged active subscription; no market data delivered in bounded poll"
+                );
+            }
+        }
     }
     registry.shutdown().await;
 
     report_latency_distribution(capability, "start", &start_latencies);
     report_latency_distribution(capability, "poll", &poll_latencies);
     report_latency_distribution(capability, "stop", &stop_latencies);
-    Ok(LiveOutcome::Success)
+    println!("LIVE {capability}: delivery_samples={delivery_samples}/{SAMPLES}");
+    Ok(if delivery_samples == 0 {
+        LiveOutcome::AcknowledgedNoData
+    } else {
+        LiveOutcome::Success
+    })
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes three bounded IEX WebSocket subscriptions"]
-async fn live_iex_level_six_single_ticker_websocket() -> anyhow::Result<()> {
+/// Run the shared bounded IEX/AAPL lifecycle smoke with explicit live credentials.
+async fn live_iex_level_six_single_ticker_websocket_run() -> anyhow::Result<()> {
     live_market_data_lifecycle("IEX level-6 WebSocket", Service::Iex).await?;
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, a documented consolidated session, and consumes three bounded WebSocket subscriptions"]
-async fn live_consolidated_level_six_single_ticker_websocket() -> anyhow::Result<()> {
+/// Run the shared bounded consolidated/AAPL lifecycle smoke with explicit live credentials.
+async fn live_consolidated_level_six_single_ticker_websocket_run() -> anyhow::Result<()> {
     live_market_data_lifecycle("consolidated level-6 WebSocket", Service::Consolidated).await?;
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes quota"]
-async fn live_consolidated_equity_single_ticker() -> anyhow::Result<()> {
+/// Validate one consolidated snapshot and its bounded historical bars.
+async fn live_consolidated_equity_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
@@ -461,6 +307,7 @@ async fn live_consolidated_equity_single_ticker() -> anyhow::Result<()> {
     .await?
         == LiveOutcome::Entitlement
     {
+        println!("LIVE: history skipped because the snapshot returned HTTP 403");
         return Ok(());
     }
     let columns = [
@@ -488,9 +335,8 @@ async fn live_consolidated_equity_single_ticker() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes quota"]
-async fn live_boats_single_ticker() -> anyhow::Result<()> {
+/// Validate one BOATS snapshot and history, recording a skipped dependency after entitlement denial.
+async fn live_boats_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
@@ -512,6 +358,7 @@ async fn live_boats_single_ticker() -> anyhow::Result<()> {
     .await?
         == LiveOutcome::Entitlement
     {
+        println!("LIVE: history skipped because the snapshot returned HTTP 403");
         return Ok(());
     }
     let columns = [
@@ -538,49 +385,43 @@ async fn live_boats_single_ticker() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, enterprise/institutional fund-fee access, and consumes quota"]
-async fn live_fund_fees_single_ticker() -> anyhow::Result<()> {
+/// Validate fund metadata and fees, recording a skipped metrics call after entitlement denial.
+async fn live_fund_fees_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
-    if classify_samples("fund metadata", ResponseShape::NonEmptyObject, || {
+    if classify_samples("fund metadata", ResponseShape::FundMetadata, || {
         client.get_fund_metadata("VFIAX")
     })
     .await?
         == LiveOutcome::Entitlement
     {
+        println!("LIVE fund fee metrics: skipped because metadata returned HTTP 403");
         return Ok(());
     }
-    classify_samples(
-        "fund fee metrics",
-        ResponseShape::NonEmptyObjectArray,
-        || client.get_fund_fee_metrics("VFIAX"),
-    )
+    classify_samples("fund fee metrics", ResponseShape::FundMetrics, || {
+        client.get_fund_fee_metrics("VFIAX")
+    })
     .await?;
 
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, early-beta Search access, and consumes quota"]
-async fn live_search_early_beta() -> anyhow::Result<()> {
+/// Validate three bounded search samples or an explicitly classified entitlement response.
+async fn live_search_early_beta_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
-    classify_samples(
-        "Tiingo asset search",
-        ResponseShape::NonEmptyObjectArray,
-        || client.search_tiingo_assets("AAPL"),
-    )
+    classify_samples("Tiingo asset search", ResponseShape::SearchAsset, || {
+        client.search_tiingo_assets("AAPL")
+    })
     .await?;
 
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, Crypto Yield entitlement, and consumes quota"]
-async fn live_crypto_yield_metrics_single_pool() -> anyhow::Result<()> {
+/// Validate a fixed yield-pool history with bounded repeat sampling.
+async fn live_crypto_yield_metrics_single_pool_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
     let range = DateRange {
@@ -590,7 +431,7 @@ async fn live_crypto_yield_metrics_single_pool() -> anyhow::Result<()> {
 
     classify_samples(
         "crypto yield pool metrics",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::YieldMetric,
         || {
             client.get_crypto_yield_metrics(
                 "aavev2_usdc",
@@ -604,9 +445,8 @@ async fn live_crypto_yield_metrics_single_pool() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes three bounded forex quote requests"]
-async fn live_forex_quotes_single_pair() -> anyhow::Result<()> {
+/// Validate repeated quotes for one explicit currency pair.
+async fn live_forex_quotes_single_pair_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
     let pairs = vec!["eurusd".to_owned()];
@@ -621,9 +461,8 @@ async fn live_forex_quotes_single_pair() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, corporate-action entitlement, and consumes three bounded distribution requests"]
-async fn live_distributions_by_ex_date_tiny_filter() -> anyhow::Result<()> {
+/// Validate distribution samples for one exact ex-date without an unfiltered market call.
+async fn live_distributions_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
@@ -637,9 +476,8 @@ async fn live_distributions_by_ex_date_tiny_filter() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY, corporate-action entitlement, and consumes three bounded split requests"]
-async fn live_splits_by_ex_date_tiny_filter() -> anyhow::Result<()> {
+/// Validate split samples for one exact ex-date without an unfiltered market call.
+async fn live_splits_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
 
@@ -653,9 +491,8 @@ async fn live_splits_by_ex_date_tiny_filter() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires TIINGO_API_KEY and consumes quota"]
-async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
+/// Validate representative filtered REST families and classify entitlement responses.
+async fn live_read_only_tiingo_capabilities_run() -> anyhow::Result<()> {
     anyhow::ensure!(
         std::env::var("TIINGO_API_KEY")
             .ok()
@@ -668,7 +505,7 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
 
     let metadata_outcome = classify(
         "stock metadata",
-        ResponseShape::NonEmptyObject,
+        ResponseShape::StockMetadata,
         client.get_stock_metadata("AAPL"),
     )
     .await?;
@@ -679,7 +516,7 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
 
     let eod_outcome = classify(
         "short stock EOD range",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::IntradayBar,
         client.get_stock_prices("AAPL", short_range(), None),
     )
     .await?;
@@ -730,7 +567,7 @@ async fn live_read_only_tiingo_capabilities() -> anyhow::Result<()> {
 async fn empty_success_is_not_live_capability_evidence() {
     let error = classify(
         "empty example",
-        ResponseShape::NonEmptyObjectArray,
+        ResponseShape::IntradayBar,
         std::future::ready(Ok(serde_json::json!([]))),
     )
     .await
@@ -878,3 +715,105 @@ fn latency_distribution_uses_count_min_p50_p95_and_max() {
     assert_eq!(summary.p95, Duration::from_millis(50));
     assert_eq!(summary.max, Duration::from_millis(50));
 }
+
+#[test]
+fn post_activation_entitlement_is_not_live_websocket_success() {
+    let poll = tiingo_mcp::websocket::registry::PollResult {
+        id: "local-test-id".to_owned(),
+        state: SubscriptionStatus::Failed,
+        terminal_error: Some(tiingo_mcp::websocket::registry::TerminalErrorKind::Entitlement),
+        events: vec![],
+    };
+    assert_eq!(
+        classify_market_poll(&poll).unwrap(),
+        MarketPollOutcome::Entitlement
+    );
+}
+
+#[test]
+fn specialized_live_families_require_their_documented_identity_and_fields() {
+    for (shape, wrong, valid) in [
+        (
+            ResponseShape::FundMetadata,
+            serde_json::json!({"ticker":"AAPL","name":"Apple"}),
+            serde_json::json!({"ticker":"VFIAX","name":"Vanguard 500 Index Fund"}),
+        ),
+        (
+            ResponseShape::FundMetrics,
+            serde_json::json!([{"ticker":"VFIAX"}]),
+            serde_json::json!([{"prospectusDate":"2024-01-01","netExpense":0.0004}]),
+        ),
+        (
+            ResponseShape::SearchAsset,
+            serde_json::json!([{"ticker":"AAPL"}]),
+            serde_json::json!([{"ticker":"AAPL","name":"Apple","assetType":"Stock","isActive":true}]),
+        ),
+        (
+            ResponseShape::YieldMetric,
+            serde_json::json!([{"date":"2024-01-01","close":1.0}]),
+            serde_json::json!([{"date":"2024-01-01T00:00:00Z","closeSupplyRate":0.04}]),
+        ),
+    ] {
+        assert!(
+            !shape.matches(&wrong),
+            "wrong-family data accepted for {shape:?}"
+        );
+        assert!(
+            shape.matches(&valid),
+            "documented data rejected for {shape:?}"
+        );
+    }
+}
+
+#[test]
+fn live_websocket_poll_rejects_other_terminal_states_and_distinguishes_empty_delivery() {
+    for (state, terminal_error) in [
+        (
+            SubscriptionStatus::Failed,
+            Some(tiingo_mcp::websocket::registry::TerminalErrorKind::Authentication),
+        ),
+        (
+            SubscriptionStatus::Failed,
+            Some(tiingo_mcp::websocket::registry::TerminalErrorKind::Protocol),
+        ),
+        (
+            SubscriptionStatus::Failed,
+            Some(tiingo_mcp::websocket::registry::TerminalErrorKind::Transport),
+        ),
+        (SubscriptionStatus::DataGap, None),
+        (SubscriptionStatus::Reconnecting, None),
+        (SubscriptionStatus::Stopped, None),
+        (SubscriptionStatus::Expired, None),
+    ] {
+        assert!(
+            classify_market_poll(&tiingo_mcp::websocket::registry::PollResult {
+                id: "local-test-id".into(),
+                state,
+                terminal_error,
+                events: vec![]
+            })
+            .is_err()
+        );
+    }
+    assert_eq!(
+        classify_market_poll(&tiingo_mcp::websocket::registry::PollResult {
+            id: "local-test-id".into(),
+            state: SubscriptionStatus::Active,
+            terminal_error: None,
+            events: vec![]
+        })
+        .unwrap(),
+        MarketPollOutcome::AcknowledgedNoData
+    );
+}
+
+macro_rules! register_legacy_live_tests {
+    ($($name:ident => $runner:ident : [$($tool:literal),*]),* $(,)?) => {
+        $(
+            #[tokio::test]
+            #[ignore = "requires nonempty TIINGO_API_KEY and consumes live quota or bandwidth"]
+            async fn $name() -> anyhow::Result<()> { $runner().await }
+        )*
+    };
+}
+live_cases::legacy_live_cases!(register_legacy_live_tests);

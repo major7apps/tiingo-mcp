@@ -40,16 +40,16 @@ See [packaging/README.md](packaging/README.md) for Homebrew publication setup an
 
 ## Contract and direct-test expectations
 
-- `tests/client_http.rs` exercises authentication, retries, redaction, same-origin enforcement, decoded response bounds, and JSON/CSV behavior.
+- `tests/client_http.rs` exercises authentication, retries, redaction, same-origin enforcement, decoded response bounds, JSON/CSV behavior, prompt return from a full stalled error prefix and secrets crossing its truncation boundary.
 - `tests/client_market_routes.rs` and `tests/client_data_routes.rs` assert literal Tiingo paths and queries for every REST family.
-- `tests/mcp_tools.rs` calls the real in-memory RMCP boundary and checks JSON text, structured data, validation, consistency, and deterministic latency.
+- `tests/mcp_tools.rs` calls the real in-memory RMCP boundary and checks JSON text, structured data, validation, consistency, and deterministic latency. Discovery tests require control descriptions and bounds in both tool text and field metadata. `tests/mcp_rest_controls.rs` asserts exact new query names, explicit false values, bounds and unchanged omitted defaults.
 - `tests/websocket_protocol.rs` covers official message/frame shapes and malformed or unknown input.
-- `tests/websocket_lifecycle.rs` covers validation, queue limits, cursor replay, data gaps, reconnects, liveness, expiry, redaction, cancellation, and worker cleanup with controlled clocks/sockets.
+- `tests/websocket_lifecycle.rs` covers validation, queue limits, cursor replay, data gaps, reconnects, liveness, expiry, redaction, cancellation, and worker cleanup with controlled clocks/sockets. Raw opcode/UTF-8 regressions cover active, initial, update and recovery receive paths while retaining abrupt-disconnect recovery. Registry regressions hold startup publication until the worker is terminal and require the returned state even after terminal-session pruning removes its entry.
 - `tests/websocket_logging.rs` runs a child process against a concrete mock socket with dependency trace logging requested and proves credentials and upstream subscription IDs never reach stdout or stderr.
 - `tests/mcp_resources.rs`, `tests/mcp_prompts.rs`, and `tests/project_docs.rs` enforce reference validity and the public resource/document surface.
-- `tests/stdio_process.rs` proves initialization, cancellation, EOF shutdown, and stdout purity in a child process.
+- `tests/stdio_process.rs` proves initialization, cancellation, EOF shutdown, and stdout purity in a child process. `tests/live_mcp.rs` adds deterministic classified-error checks and ignored actual-stdio REST/subscription-update cases.
 
-`tests/contract/baseline/v1-mcp.json` is the immutable 17-tool parity oracle. `tests/mcp_contract.rs` applies only named correctness/additive deltas, verifies that the original 17 descriptors remain compatible, and separately requires 38 tools, three fixed resources, one resource template, and five prompts.
+`tests/contract/baseline/v1-mcp.json` is the immutable 17-tool parity oracle. `tests/mcp_contract.rs` applies only named correctness/additive deltas, verifies the exact optional REST controls and broader interval domains listed in [API_SURFACE.md](API_SURFACE.md#approved-rest-controls), preserves the original 17 names, required inputs, omission behavior and results, and separately requires 38 tools, three fixed resources, one resource template, and five prompts. The frozen baseline remains immutable.
 
 Every new REST route/query, MCP tool call, WebSocket frame/parser branch, and lifecycle transition begins with a deterministic failing test. New client, MCP, and runtime code receives direct coverage; aggregate coverage alone is insufficient.
 
@@ -59,13 +59,17 @@ The normal suite is deterministic, local, and credential-free. Mock HTTP servers
 
 Ignored live tests are read-only, require a nonempty `TIINGO_API_KEY`, and consume quota or bandwidth. Run them only with explicit authorization. Use fixed tickers, dates, small filters, and finite waits. Treat a documented 403 as entitlement evidence, not a product failure. Never use bulk or all-market operations as routine smoke tests, and never force reconnect/flood behavior against Tiingo.
 
-`L` in [API_SURFACE.md](API_SURFACE.md) means bounded read-only live-testable, not that each operation has a dedicated ignored case. The separate checked-in live-smoke inventory is the exact harness; its test names and represented tools are mechanically reconciled with the Rust test sources.
+`L` in [API_SURFACE.md](API_SURFACE.md) means bounded read-only live-testable, not that each operation has a dedicated ignored case. The declared case/tool inventory in `tests/support/live_cases.rs` is shared by executable cases and documentation checks, and [API_SURFACE.md](API_SURFACE.md#checked-in-ignored-live-smokes) records its names and budgets. Avoid a second hand-maintained expected-tool mapping.
+
+The ignored `live_mcp_bounded_rest_end_to_end` case starts the actual stdio binary and calls 32 REST tools once each with ticker/date/code filters where supported, excluding bulk EOD and vendor metadata. Its budget is 32 logical calls, up to 96 HTTP attempts with the configured three-attempt policy, and a ten-second outer timeout per call. The ignored `live_mcp_iex_subscription_update_end_to_end` and `live_mcp_consolidated_subscription_update_end_to_end` cases each use one level-6 AAPL-to-MSFT start/update/poll/stop lifecycle, ten seconds per call, and a one-event/1000-ms poll. Stop and process cleanup run after failures too. Inventory additions are not live evidence and require separate approval before execution.
+
+Live reports distinguish returned data, a successful acknowledgement with no delivered events, HTTP 403 entitlement, skipped dependent operations and terminal failure. A terminal poll is never counted as success. Do not infer that a skipped downstream operation was denied, or that an acknowledged empty stream delivered data. Record actual logical calls separately from allowed retry budgets; exact wire attempt counts require instrumentation.
 
 Fixture accuracy means literal fields survive the Tiingo-to-MCP boundary and documented invariants hold. A live response from Tiingo is consistency/shape evidence, not independent price accuracy. Any independent-price accuracy claim requires a separately sourced, contemporaneous comparison with the source and observation time recorded.
 
 ## Performance evidence
 
-Warm deterministic paths before sampling. Report a latency distribution as `count`, `min`, `p50`, `p95`, and `max`, with the operation, fixture/live class, and timeout or threshold. Do not present a single timing as a distribution or compare differently scoped process trees/workloads.
+Warm deterministic paths before sampling. Report a latency distribution as `count`, `min`, `p50`, `p95`, and `max`, with the operation, fixture/live class, and timeout or threshold. State whether the first call was included; three samples give only a small observed distribution. Do not present a single timing as a distribution or compare differently scoped process trees/workloads.
 
 ## Credential and protocol safety
 

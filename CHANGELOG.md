@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.3.0 (Unreleased)
+
+### REST request controls
+
+- Added optional EOD columns/sorting, as-reported financial statements/date sorting, daily-fundamental sorting, and exact/delisted/limited asset search.
+- Added IEX history after-hours and gap filling, BOATS gap filling, bounded ticker filters for IEX/consolidated/BOATS snapshots, and crypto exchange/current-quote interval filters.
+- Accepted validated positive minute/hour interval multiples and crypto/Crypto Yield day multiples while preserving existing intervals, required inputs, omitted defaults, results and the 38-tool surface.
+
+### Reliability
+
+- Classified malformed WebSocket wire frames and invalid UTF-8 as terminal protocol failures during active and acknowledgement receives, preserving recovery after abrupt transport loss.
+- Returned the actual startup state when a worker terminates before publication, retaining its handle if terminal-session pruning removes the registry entry.
+- Described optional REST controls, bounds, mutually exclusive filters, and custom interval syntax in MCP tool discovery and field metadata.
+- Used Tiingo's explicit comma-separated path for filtered IEX snapshots while preserving the omitted all-market route.
+- Stopped reading full error-body diagnostic prefixes promptly and redacted credentials crossing the truncation boundary.
+
+### Verification and documentation
+
+- Added deterministic regressions and ignored actual-stdio REST/subscription-update cases with declared finite budgets; terminal failures, empty acknowledged streams, entitlement and skipped operations are reported separately.
+- Refreshed official request-control and exclusion guidance as of 2026-10-04, including Small Exchange REST availability, deferred upstream WebSocket families and ambiguous vendor controls. These changes do not assert new live access or independent price accuracy.
+
 ## 2.2.0 (2026-10-04)
 
 ### Distribution
