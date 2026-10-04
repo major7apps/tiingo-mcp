@@ -13,6 +13,7 @@
 - Classified malformed WebSocket wire frames and invalid UTF-8 as terminal protocol failures during active and acknowledgement receives, preserving recovery after abrupt transport loss.
 - Returned the actual startup state when a worker terminates before publication, retaining its handle if terminal-session pruning removes the registry entry.
 - Described optional REST controls, bounds, mutually exclusive filters, and custom interval syntax in MCP tool discovery and field metadata.
+- Used Tiingo's explicit comma-separated path for filtered IEX snapshots while preserving the omitted all-market route.
 - Stopped reading full error-body diagnostic prefixes promptly and redacted credentials crossing the truncation boundary.
 
 ### Verification and documentation

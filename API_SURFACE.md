@@ -23,7 +23,8 @@ Omitted optional controls are not sent upstream, preserving existing defaults an
 | Asset search | `exact_ticker_match`, `include_delisted`, `limit` | `exactTickerMatch`, `includeDelisted`, `limit` between 1 and 100 |
 | IEX history | `after_hours`, `force_fill` | `afterHours`, `forceFill` |
 | BOATS history | `force_fill` | `forceFill`; existing `after_hours` does not widen the overnight session |
-| IEX, consolidated and BOATS snapshots | `tickers` | 1–100 explicit tickers serialized as `tickers=aapl,spy`; existing `ticker` and new `tickers` are mutually exclusive where both are offered |
+| IEX snapshots | `tickers` | 1–100 explicit tickers serialized in the documented path, e.g. `/iex/aapl,spy`; omission retains `/iex` |
+| Consolidated and BOATS snapshots | `tickers` | 1–100 explicit tickers serialized as `tickers=aapl,spy`; existing `ticker` and new `tickers` are mutually exclusive |
 | Crypto current/history prices | `exchanges`; current quotes also accept `resample_freq` | `exchanges` contains 1–100 exchange identifiers; `resampleFreq` selects the interval |
 | Intraday history and crypto quotes | `resample_freq` | Canonical positive integer minutes/hours, e.g. `45min` or `4hour`; crypto and Crypto Yield also accept day multiples, e.g. `2day` |
 
@@ -50,7 +51,7 @@ With `as_reported=true`, Tiingo documents statements as released, with SEC filin
 | `get_ticker_metadata` | `GET /tiingo/daily/meta?columns=...` | vendor-supplied | Availability dependent; 1–32 allowlisted columns; no bulk live smoke | D, E, Q |
 | `get_realtime_price` | `GET /iex/{ticker}` | documented | Full TOPS fields require IEX entitlement | D, L, E, Q |
 | `get_intraday_prices` | `GET /iex/{ticker}/prices` | documented | Key capability dependent | D, L, Q |
-| `get_iex_market_snapshot` | `GET /iex[?tickers=...]` | documented | Explicit 1–100 ticker filter or unchanged all-market default; no unfiltered live smoke | D, L, E, Q |
+| `get_iex_market_snapshot` | `GET /iex[/{tickers}]` | documented | Explicit 1–100 ticker filter or unchanged all-market default; no unfiltered live smoke | D, L, E, Q |
 | `get_equity_realtime_snapshot` | `GET /tiingo/equity/intraday[/{ticker}][?tickers=...]` | beta | Single ticker or explicit 1–100 ticker filter; no unfiltered live smoke | D, L, Q |
 | `get_equity_intraday_prices` | `GET /tiingo/equity/intraday/{ticker}/prices` | beta | Consolidated 4am–8pm ET product | D, L, Q |
 | `get_boats_snapshot` | `GET /boats[/{ticker}][?tickers=...]` | beta | Separate BOATS add-on; single ticker or explicit 1–100 ticker filter | D, L, E, Q |
@@ -127,6 +128,7 @@ This inventory records the live harness that is actually checked in. It is inten
 `sources_as_of: 2026-10-04`. The public request tables and upstream WebSocket layouts were reviewed against Tiingo’s documentation module. Entitlements and beta availability can change; documentation does not prove the configured account’s current access.
 
 - [Tiingo API overview](https://www.tiingo.com/documentation/general/overview)
+- [Official changelog](https://www.tiingo.com/documentation/general/changelog), including the explicit comma-separated IEX snapshot path example
 - [End-of-Day](https://www.tiingo.com/documentation/end-of-day), the exact [bulk-ingest and corporate-action reseed workflow](https://www.tiingo.com/kb/article/the-fastest-method-to-ingest-tiingo-end-of-day-stock-api-data/), [IEX REST](https://www.tiingo.com/documentation/iex), [consolidated equity REST](https://www.tiingo.com/documentation/equity-realtime-stock-data), and [BOATS REST](https://www.tiingo.com/documentation/boats)
 - [Forex](https://www.tiingo.com/documentation/forex), [crypto](https://www.tiingo.com/documentation/crypto), [Crypto Yield](https://www.tiingo.com/documentation/crypto-yield), [news](https://www.tiingo.com/documentation/news), and [Search](https://www.tiingo.com/documentation/utilities/search)
 - [Fundamentals](https://www.tiingo.com/documentation/fundamentals), [fund fees](https://www.tiingo.com/documentation/mutual-fund-and-etf-fees), [dividends](https://www.tiingo.com/documentation/corporate-actions/dividends), and [splits](https://www.tiingo.com/documentation/corporate-actions/splits)

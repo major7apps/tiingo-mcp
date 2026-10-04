@@ -17,11 +17,11 @@ impl TiingoClient {
         &self,
         tickers: Option<&[String]>,
     ) -> Result<serde_json::Value, TiingoError> {
-        let mut query = Vec::new();
-        if let Some(tickers) = tickers {
-            query.push(("tickers", normalize_symbol_list(tickers)?));
-        }
-        self.get_json("IEX market snapshot", "/iex", &query).await
+        let path = match tickers {
+            Some(tickers) => format!("/iex/{}", normalize_symbol_list(tickers)?),
+            None => "/iex".to_owned(),
+        };
+        self.get_json("IEX market snapshot", &path, &[]).await
     }
 
     pub async fn get_realtime_price(

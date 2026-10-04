@@ -138,8 +138,8 @@ async fn documented_rest_controls_reach_the_exact_upstream_queries() {
         (
             "get_iex_market_snapshot",
             json!({"tickers":[" AAPL ","SPY"]}),
-            "/iex",
-            vec![("tickers", "aapl,spy")],
+            "/iex/aapl,spy",
+            vec![],
         ),
         (
             "get_equity_realtime_snapshot",
