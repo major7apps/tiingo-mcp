@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 (2026-10-04)
 
 ### Distribution
 
-- Added Homebrew formula generation and a Windows MSI installer to the release build. Homebrew publication requires a configured tap and publishing credentials.
+- Added Homebrew formula generation and a Windows MSI installer to the release build. The Homebrew formula is published in this repository using the release workflow's GitHub token.
 - Added checks that install release artifacts and verify the installed server's version and MCP tool discovery.
 - Kept Cargo, install scripts, direct binary downloads, desktop bundles, and manual MCP configuration available.
 
