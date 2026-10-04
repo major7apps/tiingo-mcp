@@ -27,11 +27,9 @@ The release installers, MCPB bundles, and the crates.io package all install the 
 | Rust developers | [Cargo](#install-from-cratesio-with-cargo) |
 | Custom installation | [Download and install a binary](#prebuilt-binary) |
 
-Homebrew and Windows MSI support are prepared for the next release. Until those packages are published, use the install scripts, prebuilt binaries, or desktop bundles below.
-
 ### Homebrew on macOS
 
-Once the Homebrew tap is published, install with:
+Install with:
 
 ```bash
 brew tap major7apps/tiingo-mcp https://github.com/major7apps/tiingo-mcp
@@ -43,11 +41,11 @@ The first command adds this repository to Homebrew. You only need to run it once
 
 To update, run `brew update` followed by `brew upgrade major7apps/tiingo-mcp/tiingo-mcp`. To remove the server, run `brew uninstall major7apps/tiingo-mcp/tiingo-mcp`.
 
-The formula is maintained in this repository. It is not yet available from Homebrew's central `homebrew/core` repository.
+The formula is maintained in this repository. It is not yet available from Homebrew's central `homebrew/core` repository. The [source formula and submission guide](packaging/homebrew-core/README.md) describe the path to an official formula.
 
 ### Windows installer
 
-Starting with the next release, download `tiingo-mcp-x86_64-pc-windows-msvc.msi` from the [latest GitHub release](https://github.com/major7apps/tiingo-mcp/releases/latest). Open the installer and follow the installation steps. The installer adds the binary directory to `PATH` by default.
+Download `tiingo-mcp-x86_64-pc-windows-msvc.msi` from the [latest GitHub release](https://github.com/major7apps/tiingo-mcp/releases/latest). Open the installer and follow the installation steps. The installer adds the binary directory to `PATH` by default.
 
 Open a new terminal after installation and run:
 
