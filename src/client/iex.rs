@@ -7,10 +7,12 @@ use super::{
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    /// Fetch the IEX all-market snapshot using the existing default route.
     pub async fn get_iex_market_snapshot(&self) -> Result<serde_json::Value, TiingoError> {
         self.get_iex_market_snapshot_with_tickers(None).await
     }
 
+    /// Fetch IEX snapshots with an optional normalized list of one to 100 tickers.
     pub async fn get_iex_market_snapshot_with_tickers(
         &self,
         tickers: Option<&[String]>,
@@ -35,6 +37,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch IEX bars with legacy defaults for after-hours inclusion and gap filling.
     pub async fn get_intraday_prices(
         &self,
         ticker: &str,
@@ -46,6 +49,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch IEX bars with validated minute/hour intervals and optional session, fill, and column controls.
     pub async fn get_intraday_prices_with_options(
         &self,
         ticker: &str,

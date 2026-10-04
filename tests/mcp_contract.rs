@@ -207,6 +207,94 @@ fn canonical_tools(mut tools: Vec<Value>, expected: bool) -> Vec<Value> {
     tools
 }
 
+/// Exact discovery metadata corrections approved during PR review.
+fn approved_rest_metadata(name: &str) -> &'static [(&'static str, &'static str)] {
+    match name {
+        "get_stock_prices" => &[
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_intraday_prices" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour); day intervals are not supported. Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "after_hours",
+                "Optional inclusion of after-hours prices; explicit false is forwarded, omission preserves Tiingo defaults.",
+            ),
+            (
+                "force_fill",
+                "Forward-fill missing intervals when true; explicit false is forwarded, omission preserves Tiingo defaults.",
+            ),
+        ],
+        "get_forex_prices" => &[(
+            "resample_freq",
+            "Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.",
+        )],
+        "get_crypto_quote" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min, hour, or day (e.g. 45min, 4hour, 2day). Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "exchanges",
+                "Optional 1–100 exchange identifiers; identifier case and order are preserved. Omit to use Tiingo defaults.",
+            ),
+        ],
+        "get_crypto_prices" => &[
+            (
+                "resample_freq",
+                "Canonical positive u32 integer followed by min, hour, or day (e.g. 45min, 4hour, 2day). Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "exchanges",
+                "Optional 1–100 exchange identifiers; identifier case and order are preserved. Omit to use Tiingo defaults.",
+            ),
+        ],
+        "get_financial_statements" => &[
+            (
+                "as_reported",
+                "When true, return statements as released using SEC filing publication dates; false uses latest revisions and fiscal-period dates. Omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional date or -date ordering; other field names are rejected. Omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_daily_fundamentals" => &[
+            (
+                "columns",
+                "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+            ),
+            (
+                "sort",
+                "Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
+            ),
+        ],
+        "get_company_meta" => &[(
+            "columns",
+            "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+        )],
+        "get_dividend_yield" => &[(
+            "columns",
+            "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
+        )],
+        _ => &[],
+    }
+}
+
+/// Normalize only approved optional inputs and exact discovery metadata before comparing the frozen oracle.
 fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
     let legacy_names = baseline["tools"]
         .as_array()
@@ -224,6 +312,57 @@ fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
         "legacy tools are missing"
     );
     for tool in &mut legacy_tools {
+        let name = tool["name"].as_str().unwrap().to_owned();
+        let metadata = approved_rest_metadata(&name);
+        if !metadata.is_empty() {
+            let baseline_tool = baseline["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .unwrap();
+            let mut legacy_description = baseline_tool["description"].as_str().unwrap().to_owned();
+            if name == "get_crypto_quote" {
+                legacy_description = replace_exact_once(
+                    &legacy_description,
+                    "Get current top-of-book crypto prices.",
+                    "Get current crypto prices.",
+                );
+            }
+            let mut expected_description = legacy_description.clone();
+            for (field, description) in metadata {
+                let property = tool["inputSchema"]["properties"][*field]
+                    .as_object_mut()
+                    .unwrap();
+                remove_exact(
+                    property,
+                    "description",
+                    Value::String((*description).to_owned()),
+                );
+                let line = format!("    {field}: {description}");
+                if *field == "resample_freq" && name != "get_crypto_quote" {
+                    let old = if name == "get_intraday_prices" {
+                        "    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, etc."
+                    } else {
+                        "    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, 1day."
+                    };
+                    expected_description = replace_exact_once(&expected_description, old, &line);
+                } else {
+                    assert!(
+                        !expected_description.contains(&format!("    {field}:")),
+                        "frozen descriptor already contained {name}.{field}"
+                    );
+                    expected_description.push('\n');
+                    expected_description.push_str(&line);
+                }
+            }
+            replace_exact(
+                tool.as_object_mut().unwrap(),
+                "description",
+                Value::String(expected_description),
+                Value::String(legacy_description),
+            );
+        }
         let extensions: &[(&str, &str)] = match tool["name"].as_str().unwrap() {
             "get_stock_prices" => &[("columns", "array"), ("sort", "string")],
             "get_intraday_prices" => &[
@@ -452,6 +591,7 @@ fn expected_resource_body(uri: &str, mut body: Value) -> Value {
     body
 }
 
+/// Verify and remove only the named source-date, access, and additive resource corrections.
 fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
     let object = body.as_object_mut().unwrap();
     let entitlement_statement = "Access depends on current Tiingo account entitlements; a 403 means this credential is not entitled to the requested capability.";
@@ -913,6 +1053,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
     body
 }
 
+/// Verify and remove only the explicitly documented REST guide additions.
 fn remove_rest_control_delta(uri: &str, mut body: Value) -> Value {
     if uri == "tiingo://guide/stocks" {
         assert_eq!(
@@ -947,6 +1088,7 @@ fn remove_rest_control_delta(uri: &str, mut body: Value) -> Value {
     body
 }
 
+/// Normalize approved resource metadata while retaining unrelated contract fields.
 fn canonical_resource_result(uri: &str, mut result: Value, expected: bool) -> Value {
     normalize_protocol_metadata(result.as_object_mut().unwrap());
     for content in result["contents"].as_array_mut().unwrap() {

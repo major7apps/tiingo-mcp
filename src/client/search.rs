@@ -14,6 +14,7 @@ pub fn validate_search_query(query: &str) -> Result<String, TiingoError> {
 }
 
 impl TiingoClient {
+    /// Search assets by normalized text while preserving Tiingo search defaults.
     pub async fn search_tiingo_assets(
         &self,
         query: &str,
@@ -22,6 +23,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Search assets with optional exact matching, delisted inclusion, and a one-to-100 result limit.
     pub async fn search_tiingo_assets_with_options(
         &self,
         query: &str,

@@ -44,6 +44,7 @@ pub enum ResponseShape {
 }
 
 impl ResponseShape {
+    /// Require the documented response-family fields and identities before accepting live data.
     pub fn matches(self, value: &Value) -> bool {
         match self {
             Self::StockMetadata => value.as_object().is_some_and(|row| {
@@ -175,6 +176,7 @@ impl ResponseShape {
     }
 }
 
+/// Require a nonempty array whose every object satisfies the family predicate.
 fn all_rows(value: &Value, predicate: impl Fn(&serde_json::Map<String, Value>) -> bool) -> bool {
     value.as_array().is_some_and(|rows| {
         !rows.is_empty()
@@ -184,6 +186,7 @@ fn all_rows(value: &Value, predicate: impl Fn(&serde_json::Map<String, Value>) -
     })
 }
 
+/// Require a named response field to contain a nonempty string.
 fn non_empty_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
     object
         .get(field)
@@ -191,6 +194,7 @@ fn non_empty_string(object: &serde_json::Map<String, Value>, field: &str) -> boo
         .is_some_and(|value| !value.is_empty())
 }
 
+/// Compare ticker identities without ASCII case sensitivity and other identifiers exactly.
 fn string_field_is(object: &serde_json::Map<String, Value>, field: &str, expected: &str) -> bool {
     object
         .get(field)
@@ -204,12 +208,14 @@ fn string_field_is(object: &serde_json::Map<String, Value>, field: &str, expecte
         })
 }
 
+/// Require at least one documented numeric field in a response object.
 fn has_number(object: &serde_json::Map<String, Value>, fields: &[&str]) -> bool {
     fields
         .iter()
         .any(|field| object.get(*field).is_some_and(Value::is_number))
 }
 
+/// Require valid OHLC bounds and a nonnegative numeric volume.
 fn valid_ohlcv_bar(object: &serde_json::Map<String, Value>) -> bool {
     valid_ohlc_bar(object)
         && object
@@ -218,6 +224,7 @@ fn valid_ohlcv_bar(object: &serde_json::Map<String, Value>) -> bool {
             .is_some_and(|volume| volume >= 0.0)
 }
 
+/// Require numeric OHLC values whose high and low bound the open and close.
 fn valid_ohlc_bar(object: &serde_json::Map<String, Value>) -> bool {
     let Some(open) = object.get("open").and_then(Value::as_f64) else {
         return false;
@@ -234,6 +241,7 @@ fn valid_ohlc_bar(object: &serde_json::Map<String, Value>) -> bool {
     high >= open && high >= close && high >= low && low <= open && low <= close
 }
 
+/// Require a nested price array to contain a documented numeric field.
 fn nested_rows_have_number(
     object: &serde_json::Map<String, Value>,
     field: &str,
@@ -257,10 +265,12 @@ pub enum MarketPollOutcome {
     Entitlement,
 }
 
+/// Classify a bounded IEX/AAPL level-six poll using the shared delivery validator.
 pub fn classify_market_poll(poll: &PollResult) -> anyhow::Result<MarketPollOutcome> {
     classify_market_poll_for_service(poll, Service::Iex, &["AAPL"])
 }
 
+/// Distinguish delivery, acknowledged empty data, entitlement, and unexpected terminal states.
 pub fn classify_market_poll_for_service(
     poll: &PollResult,
     service: Service,
@@ -292,6 +302,7 @@ pub fn classify_market_poll_for_service(
     })
 }
 
+/// Decode a level-six event and require subscribed identity, RFC3339 time, and a finite price.
 pub fn validate_market_event(
     payload: &Value,
     service: Service,
@@ -324,6 +335,7 @@ pub fn validate_market_event(
     }
 }
 
+/// Parse an exact calendar date or RFC3339 timestamp without accepting arbitrary suffixes.
 fn calendar_date(date: &str) -> Option<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .ok()
@@ -341,6 +353,7 @@ pub struct RestCase {
 }
 
 impl RestCase {
+    /// Build bounded case arguments, refreshing the rolling history window where required.
     pub fn arguments(&self) -> Value {
         let mut value: Value = serde_json::from_str(self.arguments_json)
             .expect("literal live arguments are valid JSON");
@@ -352,6 +365,7 @@ impl RestCase {
         value
     }
 
+    /// Require the response family plus the requested ticker, code, date window, and OHLC invariants.
     pub fn validate(&self, data: &Value, arguments: &Value) -> bool {
         if !self.shape.matches(data) {
             return false;
@@ -642,6 +656,7 @@ pub(crate) use legacy_live_cases;
 
 macro_rules! declared_legacy_inventory {
     ($($name:ident => $runner:ident : [$($tool:literal),*]),* $(,)?) => {
+        /// Return the executable legacy live-case names and their declared tool coverage.
         fn legacy_inventory() -> BTreeMap<String, BTreeSet<String>> {
             BTreeMap::from([$( (stringify!($name).to_owned(), BTreeSet::from([$($tool.to_owned()),*])) ),*])
         }
@@ -649,6 +664,7 @@ macro_rules! declared_legacy_inventory {
 }
 legacy_live_cases!(declared_legacy_inventory);
 
+/// Return legacy and actual-stdio live cases from one maintained inventory.
 pub fn live_inventory() -> BTreeMap<String, BTreeSet<String>> {
     let mut inventory = legacy_inventory();
     inventory.insert(

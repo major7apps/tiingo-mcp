@@ -36,6 +36,8 @@ The exact approved changes to legacy descriptors are:
 - Optional `exchanges` and `resample_freq` on `get_crypto_quote`; optional `exchanges` on `get_crypto_prices`.
 - Broader valid `resample_freq` strings on `get_intraday_prices`, `get_forex_prices`, and `get_crypto_prices`, retaining every previously accepted value.
 
+MCP discovery describes these controls in both tool text and field descriptions, including bounds, omitted defaults, mutually exclusive snapshot filters, and the expanded interval syntax. Compatibility tests permit only these named metadata corrections while preserving the frozen oracle and unrelated descriptor fields.
+
 With `as_reported=true`, Tiingo documents statements as released, with SEC filing publication dates. When omitted or false, Tiingo returns the latest revisions with fiscal-period dates. This is a request mode; it does not establish a complete point-in-time dataset or independent accounting accuracy.
 
 ## Implemented tools

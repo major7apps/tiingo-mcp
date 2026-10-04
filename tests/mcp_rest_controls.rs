@@ -10,6 +10,7 @@ use wiremock::{
     matchers::{method, path, query_param},
 };
 
+/// Call the actual RMCP boundary against a credential-free mock upstream and await cleanup.
 async fn call(name: &str, args: Value, upstream: &MockServer) -> rmcp::model::CallToolResult {
     let tiingo = TiingoClient::new(Config {
         api_key: Some("fixture-key".into()),

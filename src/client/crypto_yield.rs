@@ -85,6 +85,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch one yield pool history with validated minute, hour, or day intervals.
     pub async fn get_crypto_yield_metrics(
         &self,
         pool_code: &str,

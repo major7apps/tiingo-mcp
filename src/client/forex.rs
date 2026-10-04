@@ -20,6 +20,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch forex bars with minute/hour intervals and the legacy one-day interval.
     pub async fn get_forex_prices(
         &self,
         ticker: &str,

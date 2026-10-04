@@ -691,6 +691,94 @@ const EXPECTED_TOOL_SCHEMAS: [ExpectedToolSchema; 36] = [
 ];
 
 #[tokio::test]
+async fn discovery_describes_rest_controls_and_interval_domains() {
+    let upstream = MockServer::start().await;
+    let connection = Connection::new(test_client(&upstream, "test-key")).await;
+    let tools = connection.client.list_tools(None).await.unwrap().tools;
+    let controls: &[(&str, &str, &[&str])] = &[
+        ("get_stock_prices", "columns", &["1–32"]),
+        ("get_stock_prices", "sort", &["-"]),
+        ("get_financial_statements", "as_reported", &["SEC filing"]),
+        ("get_financial_statements", "sort", &["date", "-date"]),
+        ("get_daily_fundamentals", "columns", &["1–32"]),
+        ("get_daily_fundamentals", "sort", &["-"]),
+        ("get_intraday_prices", "columns", &["1–32"]),
+        ("get_intraday_prices", "after_hours", &["after-hours"]),
+        ("get_intraday_prices", "force_fill", &["Forward-fill"]),
+        ("get_iex_market_snapshot", "tickers", &["1–100", "Omit"]),
+        (
+            "get_equity_realtime_snapshot",
+            "tickers",
+            &["1–100", "mutually exclusive"],
+        ),
+        (
+            "get_boats_snapshot",
+            "tickers",
+            &["1–100", "mutually exclusive"],
+        ),
+        ("get_boats_prices", "force_fill", &["Forward-fill"]),
+        ("search_tiingo_assets", "exact_ticker_match", &["ticker"]),
+        ("search_tiingo_assets", "include_delisted", &["delisted"]),
+        ("search_tiingo_assets", "limit", &["1–100"]),
+        ("get_crypto_quote", "exchanges", &["1–100", "case"]),
+        ("get_crypto_prices", "exchanges", &["1–100", "case"]),
+        ("get_company_meta", "columns", &["1–32"]),
+        ("get_dividend_yield", "columns", &["1–32"]),
+        (
+            "get_intraday_prices",
+            "resample_freq",
+            &["45min", "4hour", "u32"],
+        ),
+        (
+            "get_equity_intraday_prices",
+            "resample_freq",
+            &["45min", "1day", "u32"],
+        ),
+        (
+            "get_boats_prices",
+            "resample_freq",
+            &["45min", "1day", "u32"],
+        ),
+        (
+            "get_forex_prices",
+            "resample_freq",
+            &["45min", "1day", "u32"],
+        ),
+        ("get_crypto_quote", "resample_freq", &["2day", "u32"]),
+        ("get_crypto_prices", "resample_freq", &["2day", "u32"]),
+        (
+            "get_crypto_yield_metrics",
+            "resample_freq",
+            &["2day", "u32"],
+        ),
+    ];
+    for (name, field, fragments) in controls {
+        let tool = tools.iter().find(|tool| tool.name == *name).unwrap();
+        let field_description = tool.input_schema["properties"][*field]["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name}.{field} has no discovery description"));
+        let description = tool.description.as_deref().unwrap();
+        assert!(
+            description.contains(&format!("{field}:")),
+            "{name} omits {field}"
+        );
+        for fragment in *fragments {
+            assert!(
+                field_description.contains(fragment),
+                "{name}.{field} omits {fragment}"
+            );
+            assert!(description.contains(fragment), "{name} omits {fragment}");
+        }
+    }
+    for name in ["get_equity_realtime_snapshot", "get_boats_snapshot"] {
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert!(tool.description.as_deref().unwrap().contains("Omit both"));
+    }
+    assert!(upstream.received_requests().await.unwrap().is_empty());
+    connection.close().await;
+}
+
+#[tokio::test]
 async fn preserves_legacy_tool_descriptors_and_discovers_additive_typed_tools() {
     let upstream = MockServer::start().await;
     let connection = Connection::new(test_client(&upstream, "test-key")).await;
@@ -894,6 +982,7 @@ async fn websocket_lifecycle_tools_cross_real_rmcp_and_rfc6455_boundaries() {
     }
 }
 
+/// Exercise subscription start, delivery, mutation, and cleanup through real RMCP and RFC6455 boundaries.
 async fn assert_websocket_lifecycle_through_mcp(service: &'static str, wire_service: &'static str) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("ws://{}", listener.local_addr().unwrap());

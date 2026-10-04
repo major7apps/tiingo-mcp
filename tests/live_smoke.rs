@@ -151,6 +151,7 @@ fn require_live_api_key() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Measure bounded level-six acknowledgement, poll classification, and cleanup over three samples.
 async fn live_market_data_lifecycle(
     capability: &str,
     service: Service,
@@ -278,16 +279,19 @@ async fn live_market_data_lifecycle(
     })
 }
 
+/// Run the shared bounded IEX/AAPL lifecycle smoke with explicit live credentials.
 async fn live_iex_level_six_single_ticker_websocket_run() -> anyhow::Result<()> {
     live_market_data_lifecycle("IEX level-6 WebSocket", Service::Iex).await?;
     Ok(())
 }
 
+/// Run the shared bounded consolidated/AAPL lifecycle smoke with explicit live credentials.
 async fn live_consolidated_level_six_single_ticker_websocket_run() -> anyhow::Result<()> {
     live_market_data_lifecycle("consolidated level-6 WebSocket", Service::Consolidated).await?;
     Ok(())
 }
 
+/// Validate one consolidated snapshot and its bounded historical bars.
 async fn live_consolidated_equity_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -331,6 +335,7 @@ async fn live_consolidated_equity_single_ticker_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate one BOATS snapshot and history, recording a skipped dependency after entitlement denial.
 async fn live_boats_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -380,6 +385,7 @@ async fn live_boats_single_ticker_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate fund metadata and fees, recording a skipped metrics call after entitlement denial.
 async fn live_fund_fees_single_ticker_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -401,6 +407,7 @@ async fn live_fund_fees_single_ticker_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate three bounded search samples or an explicitly classified entitlement response.
 async fn live_search_early_beta_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -413,6 +420,7 @@ async fn live_search_early_beta_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate a fixed yield-pool history with bounded repeat sampling.
 async fn live_crypto_yield_metrics_single_pool_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -437,6 +445,7 @@ async fn live_crypto_yield_metrics_single_pool_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate repeated quotes for one explicit currency pair.
 async fn live_forex_quotes_single_pair_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -452,6 +461,7 @@ async fn live_forex_quotes_single_pair_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate distribution samples for one exact ex-date without an unfiltered market call.
 async fn live_distributions_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -466,6 +476,7 @@ async fn live_distributions_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate split samples for one exact ex-date without an unfiltered market call.
 async fn live_splits_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     require_live_api_key()?;
     let client = TiingoClient::from_env()?;
@@ -480,6 +491,7 @@ async fn live_splits_by_ex_date_tiny_filter_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate representative filtered REST families and classify entitlement responses.
 async fn live_read_only_tiingo_capabilities_run() -> anyhow::Result<()> {
     anyhow::ensure!(
         std::env::var("TIINGO_API_KEY")

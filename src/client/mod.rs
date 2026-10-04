@@ -256,6 +256,7 @@ fn retry_delay(retry_after: Option<Duration>, fallback: Duration, max_delay: Dur
     retry_after.unwrap_or(fallback).min(max_delay)
 }
 
+/// Read only the diagnostic byte prefix and redact full or boundary-truncated credential echoes.
 async fn bounded_error_text(
     response: reqwest::Response,
     api_key: &str,

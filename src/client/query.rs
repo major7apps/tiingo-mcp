@@ -33,10 +33,12 @@ pub enum IntradayResample {
 }
 
 impl IntradayResample {
+    /// Validate the supported interval, including manually constructed custom variants.
     pub fn validate(&self) -> Result<(), TiingoError> {
         validate_frequency(self.as_str(), true).map_err(TiingoError::Validation)
     }
 
+    /// Reject day multiples for market endpoints while preserving the legacy one-day interval.
     pub fn validate_market_interval(&self) -> Result<(), TiingoError> {
         self.validate()?;
         if self.as_str().ends_with("day") && self.as_str() != "1day" {
@@ -48,6 +50,7 @@ impl IntradayResample {
         Ok(())
     }
 
+    /// Return the interval string used in Tiingo request parameters.
     pub fn as_str(&self) -> &str {
         match self {
             Self::OneMinute => "1min",
@@ -64,6 +67,7 @@ impl IntradayResample {
 impl TryFrom<String> for IntradayResample {
     type Error = String;
 
+    /// Parse a canonical interval while preserving the existing named variants.
     fn try_from(value: String) -> Result<Self, Self::Error> {
         validate_frequency(&value, true)?;
         Ok(match value.as_str() {
@@ -79,6 +83,7 @@ impl TryFrom<String> for IntradayResample {
 }
 
 impl From<IntradayResample> for String {
+    /// Return the stored Tiingo interval string without changing its spelling.
     fn from(value: IntradayResample) -> Self {
         value.as_str().to_owned()
     }
@@ -96,10 +101,12 @@ pub enum IexResample {
 }
 
 impl IexResample {
+    /// Validate the supported interval, including manually constructed custom variants.
     pub fn validate(&self) -> Result<(), TiingoError> {
         validate_frequency(self.as_str(), false).map_err(TiingoError::Validation)
     }
 
+    /// Return the interval string used in Tiingo request parameters.
     pub fn as_str(&self) -> &str {
         match self {
             Self::OneMinute => "1min",
@@ -115,6 +122,7 @@ impl IexResample {
 impl TryFrom<String> for IexResample {
     type Error = String;
 
+    /// Parse a canonical interval while preserving the existing named variants.
     fn try_from(value: String) -> Result<Self, Self::Error> {
         validate_frequency(&value, false)?;
         Ok(match value.as_str() {
@@ -129,11 +137,13 @@ impl TryFrom<String> for IexResample {
 }
 
 impl From<IexResample> for String {
+    /// Return the stored Tiingo interval string without changing its spelling.
     fn from(value: IexResample) -> Self {
         value.as_str().to_owned()
     }
 }
 
+/// Require a positive u32 interval with a supported unit and no leading zeroes.
 fn validate_frequency(value: &str, allow_days: bool) -> Result<(), String> {
     let number = value
         .strip_suffix("min")
@@ -293,6 +303,7 @@ pub fn validate_sort(sort: Option<&str>) -> Result<Option<String>, TiingoError> 
     Ok(Some(sort.to_owned()))
 }
 
+/// Validate one to 100 exchange identifiers while preserving identifier case and order.
 pub fn validate_exchange_list(exchanges: Option<&[String]>) -> Result<Option<String>, TiingoError> {
     let Some(exchanges) = exchanges else {
         return Ok(None);

@@ -60,6 +60,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch raw and adjusted EOD bars while preserving existing query defaults.
     pub async fn get_stock_prices(
         &self,
         ticker: &str,
@@ -70,6 +71,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch EOD bars with validated column selection and optional field ordering.
     pub async fn get_stock_prices_with_options(
         &self,
         ticker: &str,

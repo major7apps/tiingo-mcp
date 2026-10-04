@@ -5538,6 +5538,7 @@ enum MalformedWirePhase {
     RecoveryAck,
 }
 
+/// Inject malformed wire data in a selected lifecycle phase and require a terminal protocol classification.
 async fn assert_malformed_wire_is_terminal(frame: &'static [u8], phase: MalformedWirePhase) {
     use tokio::io::AsyncWriteExt;
 

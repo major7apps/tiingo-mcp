@@ -16,11 +16,13 @@ use serde_json::Value;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Select the installed test executable when supplied, otherwise use the Cargo-built binary.
 fn test_binary() -> OsString {
     std::env::var_os("TIINGO_MCP_TEST_BINARY")
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_tiingo-mcp").into())
 }
 
+/// Initialize the actual stdio binary with explicit live-key checks or credential-free test isolation.
 async fn connect(live: bool) -> anyhow::Result<RunningService<RoleClient, ()>> {
     let mut command = tokio::process::Command::new(test_binary());
     command.kill_on_drop(true);
@@ -38,6 +40,7 @@ async fn connect(live: bool) -> anyhow::Result<RunningService<RoleClient, ()>> {
         .map_err(|_| anyhow::anyhow!("stdio initialization failed"))
 }
 
+/// Call one tool with an object argument and enforce the ten-second live-harness deadline.
 async fn call(
     client: &RunningService<RoleClient, ()>,
     tool: &'static str,
@@ -63,6 +66,7 @@ enum CaseOutcome {
     NoData,
 }
 
+/// Require the success marker, source attribution, and JSON-text/structured-result parity.
 fn data(result: &CallToolResult) -> anyhow::Result<&Value> {
     let structured = result
         .structured_content
@@ -96,6 +100,7 @@ fn data(result: &CallToolResult) -> anyhow::Result<&Value> {
     Ok(&structured["data"])
 }
 
+/// Distinguish validated REST data, an empty result, and a classified entitlement rejection.
 fn classify_case(
     case: &RestCase,
     result: &CallToolResult,
@@ -118,6 +123,7 @@ fn classify_case(
     Ok(CaseOutcome::Validated)
 }
 
+/// Require MCP error parity and an explicit HTTP 403 entitlement classification.
 fn is_entitlement(result: &CallToolResult) -> anyhow::Result<bool> {
     let structured = result
         .structured_content
@@ -142,6 +148,7 @@ enum SubscriptionPollOutcome {
     Entitlement,
 }
 
+/// Require the local subscription identity and classify active data versus terminal entitlement.
 fn classify_subscription_poll(
     result: &CallToolResult,
     subscription_id: &str,
@@ -163,6 +170,7 @@ fn classify_subscription_poll(
     Ok(SubscriptionPollOutcome::Active)
 }
 
+/// Send EOF and await bounded child cleanup before the process kill fallback.
 async fn close(mut client: RunningService<RoleClient, ()>) -> anyhow::Result<()> {
     // Closing the child transport sends EOF and waits for cleanup before its kill fallback.
     tokio::time::timeout(CALL_TIMEOUT, client.close())
@@ -228,6 +236,7 @@ async fn live_mcp_bounded_rest_end_to_end() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run one bounded level-six start/update/poll/stop lifecycle and clean up after failure too.
 async fn live_subscription_update(service: &str) -> anyhow::Result<()> {
     let client = connect(true).await?;
     let mut subscription_id = None;

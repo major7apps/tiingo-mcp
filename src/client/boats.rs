@@ -8,6 +8,7 @@ use super::{
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    /// Fetch one BOATS ticker, or preserve the all-market default when omitted.
     pub async fn get_boats_snapshot(
         &self,
         ticker: Option<&str>,
@@ -15,6 +16,7 @@ impl TiingoClient {
         self.get_boats_snapshot_with_tickers(ticker, None).await
     }
 
+    /// Fetch BOATS snapshots with mutually exclusive single-ticker and bounded ticker-list filters.
     pub async fn get_boats_snapshot_with_tickers(
         &self,
         ticker: Option<&str>,
@@ -40,6 +42,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch BOATS history with the legacy omission behavior and no explicit gap-fill override.
     pub async fn get_boats_prices(
         &self,
         ticker: &str,
@@ -52,6 +55,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch overnight BOATS bars with validated intervals, columns, and optional gap filling.
     pub async fn get_boats_prices_with_options(
         &self,
         ticker: &str,

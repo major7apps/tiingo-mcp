@@ -14,6 +14,7 @@ impl TiingoClient {
         .await
     }
 
+    /// Fetch the latest financial statement revisions with legacy omission behavior.
     pub async fn get_financial_statements(
         &self,
         ticker: &str,
@@ -23,6 +24,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch statements as reported or revised, with optional date-only ordering.
     pub async fn get_financial_statements_with_options(
         &self,
         ticker: &str,
@@ -52,6 +54,7 @@ impl TiingoClient {
         .await
     }
 
+    /// Fetch daily fundamentals with existing column controls and no ordering override.
     pub async fn get_daily_fundamentals(
         &self,
         ticker: &str,
@@ -62,6 +65,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch daily fundamental metrics with validated columns and field ordering.
     pub async fn get_daily_fundamentals_with_options(
         &self,
         ticker: &str,

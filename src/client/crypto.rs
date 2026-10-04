@@ -12,6 +12,7 @@ fn tickers_query(tickers: Option<&str>) -> Vec<(&'static str, String)> {
 }
 
 impl TiingoClient {
+    /// Fetch current crypto prices with optional comma-separated ticker filters.
     pub async fn get_crypto_quote(
         &self,
         tickers: Option<&str>,
@@ -20,6 +21,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch crypto quotes with validated interval and exchange filters; preserve omitted defaults.
     pub async fn get_crypto_quote_with_options(
         &self,
         tickers: Option<&str>,
@@ -38,6 +40,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch historical crypto bars with the legacy omission behavior.
     pub async fn get_crypto_prices(
         &self,
         tickers: &str,
@@ -48,6 +51,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch historical crypto bars with validated interval and ordered exchange filters.
     pub async fn get_crypto_prices_with_options(
         &self,
         tickers: &str,

@@ -8,6 +8,7 @@ use super::{
 use crate::error::TiingoError;
 
 impl TiingoClient {
+    /// Fetch one consolidated equity ticker, or preserve the all-market default when omitted.
     pub async fn get_equity_realtime_snapshot(
         &self,
         ticker: Option<&str>,
@@ -16,6 +17,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch consolidated snapshots with mutually exclusive single-ticker and bounded ticker-list filters.
     pub async fn get_equity_realtime_snapshot_with_tickers(
         &self,
         ticker: Option<&str>,
@@ -41,6 +43,7 @@ impl TiingoClient {
             .await
     }
 
+    /// Fetch consolidated equity bars with validated market intervals and optional request controls.
     pub async fn get_equity_intraday_prices(
         &self,
         ticker: &str,
