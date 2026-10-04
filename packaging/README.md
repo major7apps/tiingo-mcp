@@ -23,7 +23,7 @@ This repository also serves as the Homebrew tap. Stable releases update `Formula
 
 The publication job uses the repository's built-in `GITHUB_TOKEN` with `contents: write`. It does not need a personal access token, a separate repository, or Actions variables. Keep publication restricted to stable releases and ordinary pushes. If branch protection later blocks the bot's push, review and merge the generated formula through a pull request.
 
-If the default branch changes during publication, the job rebases its formula commit and retries the push up to three times. A rebase conflict or repeated rejection fails publication; review the branch and rerun the failed job or merge the release's generated formula through a pull request.
+If the default branch changes during publication, the job rebases its formula commit and makes up to three push attempts. A rebase conflict or repeated rejection fails publication; review the branch and rerun the failed job or merge the release's generated formula through a pull request.
 
 Release notes include the Homebrew commands only after formula publication succeeds or confirms the formula is already current. Skipped or failed publication leaves those instructions out. Check the publication job before announcing Homebrew support.
 
@@ -39,7 +39,7 @@ Verify MCP initialization from the installed executable. Check the formula's ver
 
 The explicit URL is needed because the repository is not named `homebrew-tiingo-mcp`. Homebrew remembers the URL after the first `brew tap` command. See [Homebrew's tap documentation](https://docs.brew.sh/Taps).
 
-An official `homebrew/core` formula requires a source build and acceptance by Homebrew's maintainers. The repository tap remains available while the project works toward Homebrew's [acceptance requirements](https://docs.brew.sh/Package-Acceptance-Policy).
+An official `homebrew/core` formula requires a source build and acceptance by Homebrew's maintainers. The [source formula and submission guide](homebrew-core/README.md) record the verified candidate, remaining checks, and eligibility requirements. The repository tap remains available while the project works toward Homebrew's [acceptance requirements](https://docs.brew.sh/Package-Acceptance-Policy).
 
 Keep the install script available for Linux. The release binaries cover x86_64 and ARM64 Linux with static musl linking; Linux Homebrew installation needs its own verification before it is advertised.
 
@@ -53,6 +53,6 @@ The existing PowerShell script and ZIP archive remain available for users who wa
 
 Keep the version synchronized in `Cargo.toml`, `Cargo.lock`, and `mcpb/manifest.json`. Follow [AGENTS.md](../AGENTS.md) for version selection and release authorization.
 
-The README labels Homebrew and MSI as pending until they are published. Remove the matching pending wording only after verifying each public installation method. Keep download links on `releases/latest/` and `releases/latest/download/`.
+Verify public installation methods before announcing them in the README. Keep download links on `releases/latest/` and `releases/latest/download/`.
 
 Publishing a crate, tag, GitHub release, desktop bundle, or Homebrew formula requires release authorization. A successful local build is preparation for publication.
