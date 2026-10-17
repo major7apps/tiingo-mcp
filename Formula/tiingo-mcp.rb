@@ -1,25 +1,25 @@
 class TiingoMcp < Formula
   desc "Tiingo MCP server for stock market data, forex, crypto, news, and fundamentals"
   homepage "https://github.com/major7apps/tiingo-mcp"
-  version "2.2.0"
+  version "2.3.0"
   if OS.mac?
     if Hardware::CPU.arm?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.2.0/tiingo-mcp-aarch64-apple-darwin.tar.xz"
-      sha256 "213f08b30381207cf56b4641424b8971316b80e66c1a1495c708cd22858d726e"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.0/tiingo-mcp-aarch64-apple-darwin.tar.xz"
+      sha256 "84905b09cc1897be38d08e074d5a4210d51bd0dd19c2f8b58dd40d2b5190692b"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.2.0/tiingo-mcp-x86_64-apple-darwin.tar.xz"
-      sha256 "a061e99c49b0ea1f3bf5ce2a9c3c7a7c47776c07d5333b9a838147e87ef02c8e"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.0/tiingo-mcp-x86_64-apple-darwin.tar.xz"
+      sha256 "e1d99d21689b2d753f966ac35e799ab4ff3f83f807157e689df5f328b8ac97f0"
     end
   end
   if OS.linux?
     if Hardware::CPU.arm?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.2.0/tiingo-mcp-aarch64-unknown-linux-musl.tar.xz"
-      sha256 "38aa80e704fccf62c433aaebd19c8e0996dc82be2d744757bdfcbc0ae47f3eef"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.0/tiingo-mcp-aarch64-unknown-linux-musl.tar.xz"
+      sha256 "80884ebb848b1738037db87137d3454e4657210b95a3ef0d83a417fbcef1ff95"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.2.0/tiingo-mcp-x86_64-unknown-linux-musl.tar.xz"
-      sha256 "11a78f04979dcbe4d0dd9ef75f62a67eba92b43c905546f43b8cc6c0751b29ea"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.0/tiingo-mcp-x86_64-unknown-linux-musl.tar.xz"
+      sha256 "8b4ed4d0a91ee566af4aac31926df33af87e56986b082dd53ef5185fcce28978"
     end
   end
   license "MIT"
