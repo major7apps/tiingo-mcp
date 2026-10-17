@@ -18,6 +18,7 @@
 
 ### Dependencies
 
+- Updated rustls from 0.23.45 to 0.23.46 to fix RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348, and RUSTSEC-2026-0349.
 - Updated rmcp from 3.5.0 to 3.5.1 and tokio from 1.53.1 to 1.53.2.
 
 ### Verification and documentation
