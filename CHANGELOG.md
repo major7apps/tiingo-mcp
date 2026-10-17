@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.0 (Unreleased)
+## 2.3.0 (2026-10-17)
 
 ### REST request controls
 
@@ -15,6 +15,11 @@
 - Described optional REST controls, bounds, mutually exclusive filters, and custom interval syntax in MCP tool discovery and field metadata.
 - Used Tiingo's explicit comma-separated path for filtered IEX snapshots while preserving the omitted all-market route.
 - Stopped reading full error-body diagnostic prefixes promptly and redacted credentials crossing the truncation boundary.
+
+### Dependencies
+
+- Updated rustls from 0.23.45 to 0.23.46 to fix RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348, and RUSTSEC-2026-0349.
+- Updated rmcp from 3.5.0 to 3.5.1 and tokio from 1.53.1 to 1.53.2.
 
 ### Verification and documentation
 
