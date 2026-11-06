@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.1 (2026-11-06)
+
+### Dependencies
+
+- Updated tokio from 1.53.2 to 1.54.1 to fix RUSTSEC-2026-0386.
+- Updated rustls-webpki from 0.103.15 to 0.103.16 to fix RUSTSEC-2026-0382.
+- Updated rmcp from 3.5.1 to 3.8.0, schemars from 1.2.2 to 1.2.3, and serde_json from 1.0.151 to 1.0.154.
+
+### Distribution
+
+- Built aarch64 macOS artifacts on the `macos-15` runner because GitHub no longer starts `macos-14` runners.
+
 ## 2.3.0 (2026-10-17)
 
 ### REST request controls
