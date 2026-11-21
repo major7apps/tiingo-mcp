@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.2 (2026-11-21)
+
+### Dependencies
+
+- Updated rmcp from 3.8.0 to 3.10.0.
+
 ## 2.3.1 (2026-11-06)
 
 ### Dependencies
