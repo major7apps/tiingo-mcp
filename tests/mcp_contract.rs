@@ -264,6 +264,10 @@ fn approved_rest_metadata(name: &str) -> &'static [(&'static str, &'static str)]
         ],
         "get_financial_statements" => &[
             (
+                "ticker",
+                "Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.",
+            ),
+            (
                 "as_reported",
                 "When true, return statements as released using SEC filing publication dates; false uses latest revisions and fiscal-period dates. Omit to preserve Tiingo defaults.",
             ),
@@ -273,6 +277,10 @@ fn approved_rest_metadata(name: &str) -> &'static [(&'static str, &'static str)]
             ),
         ],
         "get_daily_fundamentals" => &[
+            (
+                "ticker",
+                "Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.",
+            ),
             (
                 "columns",
                 "Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.",
@@ -340,7 +348,13 @@ fn legacy_tools(tools: Vec<Value>, baseline: &Value) -> Vec<Value> {
                     Value::String((*description).to_owned()),
                 );
                 let line = format!("    {field}: {description}");
-                if *field == "resample_freq" && name != "get_crypto_quote" {
+                if *field == "ticker" {
+                    expected_description = replace_exact_once(
+                        &expected_description,
+                        "    ticker: Stock ticker symbol (e.g. AAPL).",
+                        &line,
+                    );
+                } else if *field == "resample_freq" && name != "get_crypto_quote" {
                     let old = if name == "get_intraday_prices" {
                         "    resample_freq: Resample frequency — 1min, 5min, 15min, 30min, 1hour, etc."
                     } else {
@@ -600,7 +614,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
             replace_exact(
                 object,
                 "as_of",
-                Value::String("2026-10-04".to_owned()),
+                Value::String("2026-11-21".to_owned()),
                 Value::String(SOURCE_DATE.to_owned()),
             );
             replace_exact(
@@ -696,8 +710,8 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                     "description": "Finite start, poll, update, and stop lifecycle over upstream Tiingo WebSockets; MCP transport remains stdio.",
                     "services": {
                         "consolidated": {
-                            "hours": "4am-8pm ET",
-                            "status": "beta",
+                            "hours": "Sunday 8pm through Friday 8pm ET",
+                            "status": "generally available",
                             "threshold_levels": [4, 6]
                         },
                         "iex": {
@@ -870,7 +884,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-10-04",
+                    "as_of": "2026-11-21",
                     "official_sources": [OFFICIAL_SOURCES[0], "https://www.tiingo.com/documentation/fundamentals"],
                     "statement": entitlement_statement
                 }),
@@ -966,7 +980,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                 object,
                 "availability",
                 serde_json::json!({
-                    "as_of": "2026-10-04",
+                    "as_of": "2026-11-21",
                     "official_sources": [
                         "https://www.tiingo.com/documentation/general/overview",
                         "https://www.tiingo.com/documentation/end-of-day",
@@ -991,7 +1005,7 @@ fn remove_task8_resource_delta(uri: &str, mut body: Value) -> Value {
                     "Intraday data is limited to recent history; check metadata for available date range.",
                     "get_realtime_price may return stale data outside market hours unless after_hours=True.",
                     "The vendor-supplied /tiingo/daily/meta route is availability-dependent and requires an explicit columns list.",
-                    "Consolidated 4am-8pm ET and BOATS 8pm-3:59am ET are separate beta products, not one 24x5 endpoint."
+                    "Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. Overnight bars begin in July 2026. Use BOATS for venue-native overnight data from 8pm to 3:59am ET with the separate BOATS entitlement. At 8pm ET prevClose switches to the current trading day's adjusted official close. Until available, prevClose uses the last trade before 8pm and prevDate is null."
                 ]),
                 serde_json::json!([
                     "Ticker symbols are case-sensitive in the URL -- always uppercase.",
@@ -1068,7 +1082,7 @@ fn remove_rest_control_delta(uri: &str, mut body: Value) -> Value {
             serde_json::json!({"eod": "get_stock_prices accepts columns and sort (a field name, prefixed with - for descending).", "iex_history": "get_intraday_prices accepts after_hours and force_fill; resample_freq accepts positive integer min or hour intervals such as 45min or 4hour.", "snapshots": "get_iex_market_snapshot, get_equity_realtime_snapshot, and get_boats_snapshot accept tickers arrays of 1 to 100 symbols. Supply ticker or tickers, never both; omitting both preserves the all-market request.", "boats_history": "get_boats_prices accepts force_fill. Consolidated and BOATS history accept custom positive integer intervals; existing 1day remains supported."})
         }
         "tiingo://guide/fundamentals" => {
-            serde_json::json!({"statements": "as_reported=true requests statements as filed with the SEC, indexed by release date; false or omission uses the latest revisions indexed by fiscal end date. sort accepts date or -date.", "daily": "get_daily_fundamentals accepts sort by field name with an optional leading - for descending."})
+            serde_json::json!({"statements": "as_reported=true requests statements as filed with the SEC, indexed by release date; false or omission uses the latest revisions indexed by fiscal end date. sort accepts date or -date.", "daily": "For statements and daily metrics, pass a Tiingo permaTicker as ticker for delisted or recycled symbols. Daily metrics accept sort by field name with an optional leading - for descending."})
         }
         "tiingo://guide/search" => {
             serde_json::json!({"filters": "exact_ticker_match and include_delisted are optional booleans; limit must be 1 to 100. Omitted controls preserve Tiingo defaults."})

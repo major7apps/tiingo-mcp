@@ -330,6 +330,7 @@ pub struct FundamentalsDefinitionsArgs {}
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FinancialStatementsArgs {
+    /// Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.
     pub ticker: String,
     #[serde(default)]
     #[schemars(with = "Option<String>")]
@@ -348,6 +349,7 @@ pub struct FinancialStatementsArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DailyFundamentalsArgs {
+    /// Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.
     pub ticker: String,
     #[serde(default)]
     #[schemars(with = "Option<String>")]
@@ -687,7 +689,7 @@ impl TiingoServer {
 
     /// Expose consolidated snapshots with mutually exclusive single and batch ticker filters over MCP.
     #[rmcp::tool(
-        description = "Get a consolidated equity beta snapshot for Tiingo's 4am–8pm ET session. It is distinct from the BOATS beta/add-on 8pm–3:59am ET session; the tools are not a unified 24x5 endpoint. Omit both ticker and tickers for the all-market snapshot; prefer explicit filters for bounded requests.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).\n    tickers: Optional 1–100 equity tickers, normalized to lowercase; mutually exclusive with ticker. Omit both filters for all-market data.",
+        description = "Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. At 8pm ET prevClose switches to the current trading day's adjusted official close. Until available, prevClose uses the last trade before 8pm and prevDate is null. Omit both ticker and tickers for the all-market snapshot; prefer explicit filters for bounded requests.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).\n    tickers: Optional 1–100 equity tickers, normalized to lowercase; mutually exclusive with ticker. Omit both filters for all-market data.",
         output_schema = structured_output_schema()
     )]
     async fn get_equity_realtime_snapshot(
@@ -706,7 +708,7 @@ impl TiingoServer {
 
     /// Expose consolidated equity history and documented interval controls over MCP.
     #[rmcp::tool(
-        description = "Get consolidated equity beta intraday history for Tiingo's 4am–8pm ET session. It is distinct from the BOATS beta/add-on 8pm–3:59am ET session; the tools are not a unified 24x5 endpoint.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.\n    after_hours: Include after-hours pricing data.\n    force_fill: Forward-fill missing intervals.\n    columns: Optional response column identifiers.",
+        description = "Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. Overnight bars begin in July 2026. Request columns open,high,low,close,volume for OHLCV.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.\n    after_hours: Include after-hours pricing data.\n    force_fill: Forward-fill missing intervals.\n    columns: Optional response column identifiers.",
         output_schema = structured_output_schema()
     )]
     async fn get_equity_intraday_prices(
@@ -729,7 +731,7 @@ impl TiingoServer {
 
     /// Expose BOATS snapshots with mutually exclusive single and batch ticker filters over MCP.
     #[rmcp::tool(
-        description = "Get a BOATS beta/add-on snapshot for Tiingo's 8pm–3:59am ET session. It is distinct from the consolidated equity beta 4am–8pm ET session; the tools are not a unified 24x5 endpoint. Omit both ticker and tickers for the all-market snapshot; prefer explicit filters for bounded requests.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).\n    tickers: Optional 1–100 equity tickers, normalized to lowercase; mutually exclusive with ticker. Omit both filters for all-market data.",
+        description = "Use BOATS for venue-native overnight data from 8pm to 3:59am ET with the separate BOATS entitlement. At 8pm ET prevClose switches to the current trading day's adjusted official close. Until available, prevClose uses the last trade before 8pm and prevDate is null. Omit both ticker and tickers for the all-market snapshot; prefer explicit filters for bounded requests.\n\nArgs:\n    ticker: Optional stock ticker symbol (e.g. AAPL).\n    tickers: Optional 1–100 equity tickers, normalized to lowercase; mutually exclusive with ticker. Omit both filters for all-market data.",
         output_schema = structured_output_schema()
     )]
     async fn get_boats_snapshot(
@@ -745,7 +747,7 @@ impl TiingoServer {
 
     /// Expose overnight BOATS history with documented fill and interval controls over MCP.
     #[rmcp::tool(
-        description = "Get BOATS beta/add-on intraday history for Tiingo's 8pm–3:59am ET session. It is distinct from the consolidated equity beta 4am–8pm ET session; the tools are not a unified 24x5 endpoint.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.\n    after_hours: Include after-hours pricing data.\n    columns: Optional response column identifiers.\n    force_fill: Forward-fill missing intervals when true; explicit false is forwarded, omission preserves Tiingo defaults.",
+        description = "Use BOATS for venue-native overnight data from 8pm to 3:59am ET with the separate BOATS entitlement.\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    resample_freq: Canonical positive u32 integer followed by min or hour (e.g. 45min, 4hour), or legacy 1day; other day multiples are not supported. Omit to preserve Tiingo defaults.\n    after_hours: Include after-hours pricing data.\n    columns: Optional response column identifiers.\n    force_fill: Forward-fill missing intervals when true; explicit false is forwarded, omission preserves Tiingo defaults.",
         output_schema = structured_output_schema()
     )]
     async fn get_boats_prices(
@@ -1006,7 +1008,7 @@ impl TiingoServer {
 
     /// Expose as-reported or revised statements with date ordering over MCP.
     #[rmcp::tool(
-        description = "Get quarterly and annual financial statements (income, balance sheet, cash flow).\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    as_reported: When true, return statements as released using SEC filing publication dates; false uses latest revisions and fiscal-period dates. Omit to preserve Tiingo defaults.\n    sort: Optional date or -date ordering; other field names are rejected. Omit to preserve Tiingo defaults.",
+        description = "Get quarterly and annual financial statements (income, balance sheet, cash flow).\n\nArgs:\n    ticker: Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    as_reported: When true, return statements as released using SEC filing publication dates; false uses latest revisions and fiscal-period dates. Omit to preserve Tiingo defaults.\n    sort: Optional date or -date ordering; other field names are rejected. Omit to preserve Tiingo defaults.",
         output_schema = structured_output_schema()
     )]
     async fn get_financial_statements(
@@ -1027,7 +1029,7 @@ impl TiingoServer {
 
     /// Expose daily fundamental metrics with optional column and sort controls over MCP.
     #[rmcp::tool(
-        description = "Get daily fundamental metrics for a stock (market cap, P/E ratio, etc).\n\nArgs:\n    ticker: Stock ticker symbol (e.g. AAPL).\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    columns: Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.\n    sort: Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
+        description = "Get daily fundamental metrics for a stock (market cap, P/E ratio, etc).\n\nArgs:\n    ticker: Stock ticker symbol or Tiingo permaTicker for a delisted or recycled symbol.\n    start_date: Start date in YYYY-MM-DD format.\n    end_date: End date in YYYY-MM-DD format.\n    columns: Optional 1–32 response field identifiers; omit to preserve Tiingo defaults.\n    sort: Optional response field identifier, prefixed with - for descending order; omit to preserve Tiingo defaults.",
         output_schema = structured_output_schema()
     )]
     async fn get_daily_fundamentals(

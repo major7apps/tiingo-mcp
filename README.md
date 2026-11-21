@@ -192,12 +192,18 @@ The server keeps the 17 tools from releases before 2.1.0 compatible. Their names
 | `get_intraday_prices` | Intraday IEX price history for one ticker, with columns, after hours and gap filling options |
 | `get_iex_market_snapshot` | Current IEX snapshot for 1–100 selected tickers, or every ticker when the filter is omitted |
 
-### Consolidated equity prices (beta, 4am to 8pm ET)
+### Consolidated equity prices (24x5)
 
 | Tool | Description |
 |---|---|
 | `get_equity_realtime_snapshot` | Current consolidated snapshot for one ticker, 1–100 selected tickers, or every ticker |
 | `get_equity_intraday_prices` | Consolidated intraday history, with options for interval, after hours data, gap filling, and columns |
+
+For consolidated OHLCV bars, call `get_equity_intraday_prices` with these arguments.
+
+```json
+{"ticker":"AAPL","start_date":"2026-08-03","end_date":"2026-08-04","resample_freq":"5min","columns":["open","high","low","close","volume"]}
+```
 
 ### Overnight BOATS prices (beta add-on, 8pm to 3:59am ET)
 
@@ -302,13 +308,13 @@ A split or dividend changes a ticker's adjusted history. So if a row has `splitF
 
 Tiingo decides which data your key can reach, based on the features enabled for your account, and this project can't promise access based on a plan name. An HTTP 401 error means Tiingo rejected your API key. An HTTP 403 error means the key is valid, but your account doesn't include the data you asked for.
 
-The access guidance below was reviewed against official documentation on **2026-10-04** (`sources_as_of`); it does not guarantee the features enabled for a particular account.
+Equity and fundamentals guidance was refreshed on **2026-11-21**. The broader access guidance was reviewed against official documentation on **2026-10-04** (`sources_as_of`); it does not guarantee the features enabled for a particular account.
 
 Some data has extra rules:
 
 - IEX subscriptions use data level 6 by default, which gives reference prices. You can request levels 0 or 5 only if you confirm that you have a direct market data agreement with IEX.
-- Consolidated equity data is in beta and covers 4am to 8pm ET. It supports reference ticks at level 6 or top of book data at level 4.
-- BOATS data is a separate beta add-on that covers 8pm to 3:59am ET. Tiingo doesn't combine it with consolidated equity data into one 24 hour feed.
+- Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. Overnight bars begin in July 2026. Use level 6 for reference prices or level 4 for liquidity estimates.
+- Use BOATS for venue-native overnight data from 8pm to 3:59am ET with the separate BOATS entitlement. At 8pm ET prevClose switches to the current trading day's adjusted official close. Until available, prevClose uses the last trade before 8pm and prevDate is null.
 - Fund fee data needs enterprise or institutional access. Fundamentals, corporate actions, and Crypto Yield depend on your account's features, and Search is in early beta. The ticker metadata from `get_ticker_metadata` comes from a data vendor and may be missing, so a 404 error from it doesn't mean you should try a different endpoint.
 
 Every REST call uses API quota and bandwidth, and every live subscription uses bandwidth. To reduce use, request only the tickers and dates you need. The bulk and all ticker tools return large responses, so call them only when you need all of that data.

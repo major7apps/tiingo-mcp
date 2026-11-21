@@ -1,7 +1,7 @@
 {
   "asset_class": "market-data",
   "availability": {
-    "as_of": "2026-10-04",
+    "as_of": "2026-11-21",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/websockets/iex",
@@ -11,7 +11,7 @@
   },
   "common_pitfalls": [
     "IEX defaults to threshold 6; levels 0 and 5 require explicit confirmation of a direct IEX market-data agreement.",
-    "Consolidated equity accepts threshold 6 reference or threshold 4 liquidity data and is documented for 4am-8pm ET.",
+    "Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. Use threshold 6 for reference prices or 4 for liquidity estimates.",
     "Poll by local arrival sequence and stop every subscription when finished; threshold changes require stop/start.",
     "A data_gap terminal state means queue bounds were exceeded and cached continuity must be re-established."
   ],
