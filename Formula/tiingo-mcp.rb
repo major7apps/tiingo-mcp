@@ -1,25 +1,25 @@
 class TiingoMcp < Formula
   desc "Tiingo MCP server for stock market data, forex, crypto, news, and fundamentals"
   homepage "https://github.com/major7apps/tiingo-mcp"
-  version "2.3.1"
+  version "2.3.2"
   if OS.mac?
     if Hardware::CPU.arm?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.1/tiingo-mcp-aarch64-apple-darwin.tar.xz"
-      sha256 "cad3e8eb8d2627967c29108adaa298872e584a15358f4cd5b235821e5f347ab0"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.2/tiingo-mcp-aarch64-apple-darwin.tar.xz"
+      sha256 "80e26a02f7831ad2ac259355047b227dd0b6456087f73a585535281f9dfca2ad"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.1/tiingo-mcp-x86_64-apple-darwin.tar.xz"
-      sha256 "7ffc66609bad19d99a9a65cab6906a0ba01b5814d59c4c0868fec61c579d63be"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.2/tiingo-mcp-x86_64-apple-darwin.tar.xz"
+      sha256 "0ccff40390e534526c210d36c52a566f2efe8fc30d3cfbd97828080b6938d94e"
     end
   end
   if OS.linux?
     if Hardware::CPU.arm?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.1/tiingo-mcp-aarch64-unknown-linux-musl.tar.xz"
-      sha256 "a0c8b149d2463f7acd9136c753b7e949c561076cc49135189d0c110bc3a68529"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.2/tiingo-mcp-aarch64-unknown-linux-musl.tar.xz"
+      sha256 "09d9627da8e628668dd5d1d087a55bd44dfe31de46320e43a13fc9ba0559a5d7"
     end
     if Hardware::CPU.intel?
-      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.1/tiingo-mcp-x86_64-unknown-linux-musl.tar.xz"
-      sha256 "01744659138e5837c498166848d7cfc0bd00643fa9ec59ba654688f2f08ce674"
+      url "https://github.com/major7apps/tiingo-mcp/releases/download/v2.3.2/tiingo-mcp-x86_64-unknown-linux-musl.tar.xz"
+      sha256 "f8cdf7d918e8031787ea32b864acbbbeff52aeb93e5fbf43ceed6cbf664a6f71"
     end
   end
   license "MIT"
