@@ -12,7 +12,10 @@ all-features = true
 # Vulnerability advisories are denied by cargo-deny 0.20.2 by default.
 yanked = "deny"
 unmaintained = "all"
-ignore = []
+ignore = [
+  # rmcp 3.10.0 requires chrono. Revisit when rmcp drops this dependency.
+  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained and has no fixed release" },
+]
 
 [licenses]
 allow = [
