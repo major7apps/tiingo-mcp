@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.3 (Unreleased)
+## 2.3.3 (2026-11-21)
 
 - Updated guidance for 24x5 consolidated equities, BOATS, previous-close rollover, explicit bar volume, and permanent identifiers for fundamentals.
 
