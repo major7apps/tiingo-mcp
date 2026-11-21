@@ -52,8 +52,8 @@ With `as_reported=true`, Tiingo documents statements as released, with SEC filin
 | `get_realtime_price` | `GET /iex/{ticker}` | documented | Full TOPS fields require IEX entitlement | D, L, E, Q |
 | `get_intraday_prices` | `GET /iex/{ticker}/prices` | documented | Key capability dependent | D, L, Q |
 | `get_iex_market_snapshot` | `GET /iex[/{tickers}]` | documented | Explicit 1–100 ticker filter or unchanged all-market default; no unfiltered live smoke | D, L, E, Q |
-| `get_equity_realtime_snapshot` | `GET /tiingo/equity/intraday[/{ticker}][?tickers=...]` | beta | Single ticker or explicit 1–100 ticker filter; no unfiltered live smoke | D, L, Q |
-| `get_equity_intraday_prices` | `GET /tiingo/equity/intraday/{ticker}/prices` | beta | Consolidated 4am–8pm ET product | D, L, Q |
+| `get_equity_realtime_snapshot` | `GET /tiingo/equity/intraday[/{ticker}][?tickers=...]` | documented | Single ticker or explicit 1–100 ticker filter; no unfiltered live smoke | D, L, Q |
+| `get_equity_intraday_prices` | `GET /tiingo/equity/intraday/{ticker}/prices` | documented | 24x5 derived feed on all self-serve plans | D, L, Q |
 | `get_boats_snapshot` | `GET /boats[/{ticker}][?tickers=...]` | beta | Separate BOATS add-on; single ticker or explicit 1–100 ticker filter | D, L, E, Q |
 | `get_boats_prices` | `GET /boats/{ticker}/prices` | beta | Separate BOATS add-on, 8pm–3:59am ET | D, L, E, Q |
 | `get_fund_metadata` | `GET /tiingo/funds/{ticker}` | documented | Enterprise/institutional fund-fee capability | D, L, E, Q |
@@ -115,7 +115,6 @@ This inventory records the live harness that is actually checked in. It is inten
 | Company descriptions, security-master bulk, raw crypto/DEX/fundamental/yield bulk | deliberately excluded | Current products lack a stable public route contract suitable for this server. |
 | Small Exchange REST | deferred | Public legacy tables describe `/smallx/meta`, `/smallx/tops`, `/smallx/{ticker}/prices`, and `/smallx/{ticker}/eod`; current feed availability and licensing need vendor confirmation. |
 | Small Exchange WebSocket | deferred | No published upstream WebSocket URL/frame contract was validated. |
-| Unified 24x5 equities | deliberately excluded | No single documented route exists; consolidated and BOATS remain separate products and sessions. |
 | BOATS WebSocket | deferred | Audited level-3 add-on, outside the approved upstream streaming slice. |
 | Crypto WebSocket | deferred | Published thresholds 2/5 and per-exchange frames; bounded ticker subscription and acknowledgement semantics need confirmation before adding a finite lifecycle. |
 | Forex WebSocket | deferred | Official prose/examples use threshold 5 while the request table uses 7; vendor clarification is required. |
@@ -124,6 +123,8 @@ This inventory records the live harness that is actually checked in. It is inten
 | Crypto raw exchange/currency conversion controls | deferred | `includeRawExchangeData`, `baseCurrency`, and `convertCurrency` are not unambiguously documented as active prices-route request controls. |
 
 ## Official sources
+
+The 2026-11-21 review updated consolidated and BOATS guidance and confirmed that statements and daily fundamentals accept a Tiingo permaTicker through the existing ticker argument.
 
 `sources_as_of: 2026-10-04`. The public request tables and upstream WebSocket layouts were reviewed against Tiingo’s documentation module. Entitlements and beta availability can change; documentation does not prove the configured account’s current access.
 

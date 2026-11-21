@@ -47,6 +47,24 @@ async fn call(name: &str, args: Value, upstream: &MockServer) -> rmcp::model::Ca
 async fn documented_rest_controls_reach_the_exact_upstream_queries() {
     let cases = [
         (
+            "get_financial_statements",
+            json!({"ticker":"US000000000038"}),
+            "/tiingo/fundamentals/US000000000038/statements",
+            vec![],
+        ),
+        (
+            "get_daily_fundamentals",
+            json!({"ticker":"US000000000038"}),
+            "/tiingo/fundamentals/US000000000038/daily",
+            vec![],
+        ),
+        (
+            "get_equity_intraday_prices",
+            json!({"ticker":"AAPL","columns":["open","high","low","close","volume"]}),
+            "/tiingo/equity/intraday/AAPL/prices",
+            vec![("columns", "open,high,low,close,volume")],
+        ),
+        (
             "get_stock_prices",
             json!({"ticker":"AAPL","sort":"-date","columns":["date","adjClose"]}),
             "/tiingo/daily/AAPL/prices",
@@ -156,7 +174,16 @@ async fn documented_rest_controls_reach_the_exact_upstream_queries() {
     ];
     for (name, args, route, query) in cases {
         let upstream = MockServer::start().await;
-        let payload = json!([{"ticker":"AAPL","date":"2024-01-02","close":185.64}]);
+        let payload = match name {
+            "get_equity_realtime_snapshot" | "get_boats_snapshot" => json!([
+                {"ticker":"AAPL","prevClose":185.64,"prevDate":"2026-08-03"},
+                {"ticker":"SPY","prevClose":620.12,"prevDate":null}
+            ]),
+            "get_equity_intraday_prices" if args.get("columns").is_some() => json!([
+                {"open":185,"high":187,"low":184,"close":186,"volume":10500}
+            ]),
+            _ => json!([{"ticker":"AAPL","date":"2024-01-02","close":185.64}]),
+        };
         let mut mock = Mock::given(method("GET")).and(path(route));
         for (key, value) in &query {
             mock = mock.and(query_param(*key, *value));

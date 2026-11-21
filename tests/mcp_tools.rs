@@ -695,7 +695,21 @@ async fn discovery_describes_rest_controls_and_interval_domains() {
     let upstream = MockServer::start().await;
     let connection = Connection::new(test_client(&upstream, "test-key")).await;
     let tools = connection.client.list_tools(None).await.unwrap().tools;
+    for (name, phrase) in [
+        ("get_equity_realtime_snapshot", "Sunday"),
+        ("get_equity_realtime_snapshot", "prevDate"),
+        ("get_boats_snapshot", "prevDate"),
+        ("get_equity_intraday_prices", "open,high,low,close,volume"),
+    ] {
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert!(
+            tool.description.as_deref().unwrap().contains(phrase),
+            "{name} must explain {phrase}"
+        );
+    }
     let controls: &[(&str, &str, &[&str])] = &[
+        ("get_financial_statements", "ticker", &["permaTicker"]),
+        ("get_daily_fundamentals", "ticker", &["permaTicker"]),
         ("get_stock_prices", "columns", &["1–32"]),
         ("get_stock_prices", "sort", &["-"]),
         ("get_financial_statements", "as_reported", &["SEC filing"]),

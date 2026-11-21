@@ -1,7 +1,7 @@
 {
   "asset_class": "stocks",
   "availability": {
-    "as_of": "2026-10-04",
+    "as_of": "2026-11-21",
     "official_sources": [
       "https://www.tiingo.com/documentation/general/overview",
       "https://www.tiingo.com/documentation/end-of-day",
@@ -17,7 +17,7 @@
     "Intraday data is limited to recent history; check metadata for available date range.",
     "get_realtime_price may return stale data outside market hours unless after_hours=True.",
     "The vendor-supplied /tiingo/daily/meta route is availability-dependent and requires an explicit columns list.",
-    "Consolidated 4am-8pm ET and BOATS 8pm-3:59am ET are separate beta products, not one 24x5 endpoint."
+    "Use 24x5 Consolidated for derived US equity reference prices and liquidity estimates from Sunday 8pm through Friday 8pm ET on all self-serve plans. Overnight bars begin in July 2026. Use BOATS for venue-native overnight data from 8pm to 3:59am ET with the separate BOATS entitlement. At 8pm ET prevClose switches to the current trading day's adjusted official close. Until available, prevClose uses the last trade before 8pm and prevDate is null."
   ],
   "description": "Equities with EOD and bulk refresh, lifecycle metadata, IEX, consolidated realtime, and BOATS overnight data.",
   "ticker_format": "Uppercase symbols, e.g. AAPL, MSFT, GOOGL, BRK-A",
